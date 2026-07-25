@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  CR-Sentinel demo target app -- intentionally vulnerable endpoints used as
+  the attack surface for the patrol agent demo (PRD-02).
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 10
+    MemorySize: 128
+    Environment:
+      Variables:
+        CRDB_HOST: !Ref CrdbHost
+        CRDB_DATABASE: !Ref CrdbDatabase
+        CRDB_USER: !Ref CrdbUser
+        CRDB_PASSWORD: !Ref CrdbPassword
+
+Parameters:
+  CrdbHost:
+    Type: String
+  CrdbDatabase:
+    Type: String
+    Default: cr_sentinel
+  CrdbUser:
+    Type: String
+  CrdbPassword:
+    Type: String
+    NoEcho: true
+
+Resources:
+  LoginFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: demo_target_app.app.login_handler
+      Events:
+        Login:
+          Type: Api
+          Properties:
+            Path: /login
+            Method: post
+
+  ProfileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: demo_target_app.app.profile_handler
+      Events:
+        Profile:
+          Type: Api
+          Properties:
+            Path: /profile
+            Method: get
+
+  CommentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: demo_target_app.app.comments_handler
+      Events:
+        CommentsGet:
+          Type: Api
+          Properties:
+            Path: /comments
+            Method: get
+        CommentsPost:
+          Type: Api
+          Properties:
+            Path: /comments
+            Method: post
+
+  AdminFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: demo_target_app.app.admin_handler
+      Events:
+        Admin:
+          Type: Api
+          Properties:
+            Path: /admin
+            Method: get
+
+Outputs:
+  ApiUrl:
+    Description: Base URL of the demo target app
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
