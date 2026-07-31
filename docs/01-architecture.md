@@ -215,7 +215,7 @@ EventBridge 触发 PatrolAgentLambda
 
 ## 6. 风险与验证清单（Week 1 Day 1 必须先跑通的 spike）
 
-1. 确认 CockroachDB Cloud MCP Server 实际暴露的工具名/参数（`run_read_query`、`vector_search` 是基于产品描述的假设名，需要对照 Cloud Console 生成的 MCP 配置片段核实）
+1. ~~确认 CockroachDB Cloud MCP Server 实际暴露的工具名/参数~~ 已在 PRD-03 核实：只读查询工具实际名为 `select_query`（而非之前假设的 `run_read_query`），且没有独立的 `vector_search` 工具——语义检索复用同一个 `select_query`，靠 `ORDER BY embedding <-> $vec` 走向量索引。参数名（`sql`）与返回结构仍需对照 Cloud Console 生成的配置片段做最终核实，见 `services/patrol-agent/README.md`
 2. 立刻申请 Amazon Bedrock Claude 模型访问权限（部分区域/模型要账号级审批，可能有延迟，Day 1 第一件事就做，不要等到 Week 2）
 3. 确认目标 CRDB 版本的 `VECTOR` 类型语法、距离函数（cosine/L2）、向量索引建法
 4. 确认 Titan Embeddings 输出维度与 CRDB 向量列定义一致
