@@ -18,3 +18,11 @@ class CrdbWriteError(Exception):
     """The independent least-privilege write channel rejected or failed a
     disposal write. Distinct from McpUnavailableError so callers can log
     and alert on it without conflating it with a read-side degradation."""
+
+
+class BedrockJudgeError(Exception):
+    """The Bedrock Claude tool-use call failed, timed out, or returned a
+    verdict that doesn't match the forced JSON schema. The patrol loop
+    (PRD-04) catches this per-IP and skips disposal for that IP rather than
+    aborting the whole round -- one malformed verdict shouldn't stop later
+    IPs in the same window from being judged."""

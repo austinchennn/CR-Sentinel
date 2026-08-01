@@ -1,0 +1,81 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  CR-Sentinel PatrolAgentLambda -- EventBridge Scheduler triggers this on an
+  interval; it reads recent request_logs, recalls attack_signatures +
+  agent_episodes memory over the read-only MCP channel, asks Bedrock Claude
+  for a structured risk verdict per suspicious IP, and executes disposal
+  writes over the independent least-privilege write channel (PRD-04).
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 60
+    MemorySize: 256
+    Environment:
+      Variables:
+        MCP_URL: !Ref McpUrl
+        MCP_API_KEY: !Ref McpApiKey
+        CRDB_WRITE_HOST: !Ref CrdbWriteHost
+        CRDB_WRITE_DATABASE: !Ref CrdbWriteDatabase
+        CRDB_WRITE_USER: !Ref CrdbWriteUser
+        CRDB_WRITE_PASSWORD: !Ref CrdbWritePassword
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+        PATROL_WINDOW_MINUTES: !Ref PatrolWindowMinutes
+
+Parameters:
+  McpUrl:
+    Type: String
+    Default: https://cockroachlabs.cloud/mcp
+  McpApiKey:
+    Type: String
+    NoEcho: true
+  CrdbWriteHost:
+    Type: String
+  CrdbWriteDatabase:
+    Type: String
+    Default: cr_sentinel
+  CrdbWriteUser:
+    Type: String
+  CrdbWritePassword:
+    Type: String
+    NoEcho: true
+  BedrockModelId:
+    Type: String
+    Default: anthropic.claude-3-5-sonnet-20241022-v2:0
+  # Log lookback window read each round -- independent of how often
+  # EventBridge triggers the function (PatrolIntervalMinutes below).
+  PatrolWindowMinutes:
+    Type: String
+    Default: "5"
+  # PRD-04 functional requirement 1: 2-5 minutes, shortened for live demos.
+  PatrolIntervalMinutes:
+    Type: Number
+    Default: 5
+    MinValue: 1
+
+Resources:
+  PatrolAgentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: patrol_agent.app.patrol_handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:Converse
+              Resource: "*"
+      Events:
+        PatrolSchedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: !Sub "rate(${PatrolIntervalMinutes} minutes)"
+            FlexibleTimeWindow:
+              Mode: "OFF"
+
+Outputs:
+  PatrolAgentFunctionArn:
+    Description: ARN of PatrolAgentLambda, for CloudWatch Alarms (PRD-09) and manual invokes
+    Value: !GetAtt PatrolAgentFunction.Arn
