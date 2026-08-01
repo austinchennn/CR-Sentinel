@@ -32,6 +32,41 @@ class McpConfig:
 
 
 @dataclass(frozen=True)
+class BedrockConfig:
+    # Default matches whatever Claude model access was approved under
+    # PRD-00's Day 1 Bedrock access request; override once the actual
+    # approved model ID is known rather than assuming this one is granted.
+    model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+
+    @classmethod
+    def from_env(cls):
+        return cls(model_id=os.environ.get("BEDROCK_MODEL_ID", cls.model_id))
+
+
+@dataclass(frozen=True)
+class PatrolConfig:
+    """Tunables for one patrol round (PRD-04). Kept separate from
+    McpConfig/CrdbWriteConfig/BedrockConfig since these govern orchestration
+    behavior, not a specific external channel's credentials."""
+
+    window_minutes: int = 5
+    top_k: int = 5
+    ip_history_limit: int = 20
+    high_frequency_threshold: int = 20
+
+    @classmethod
+    def from_env(cls):
+        return cls(
+            window_minutes=int(os.environ.get("PATROL_WINDOW_MINUTES", cls.window_minutes)),
+            top_k=int(os.environ.get("PATROL_TOP_K", cls.top_k)),
+            ip_history_limit=int(os.environ.get("PATROL_IP_HISTORY_LIMIT", cls.ip_history_limit)),
+            high_frequency_threshold=int(
+                os.environ.get("PATROL_HIGH_FREQUENCY_THRESHOLD", cls.high_frequency_threshold)
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class CrdbWriteConfig:
     host: str
     port: str

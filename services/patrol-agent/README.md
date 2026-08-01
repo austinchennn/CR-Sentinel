@@ -1,8 +1,8 @@
 # patrol-agent
 
-MCP connectivity layer for `PatrolAgentLambda` (see
-`docs/prd/PRD-03-mcp-connectivity.md`). Two independent channels between
-the agent and CockroachDB:
+`PatrolAgentLambda`: the EventBridge-triggered inference loop (PRD-04),
+built on the MCP connectivity layer (PRD-03). Two independent channels
+between the agent and CockroachDB:
 
 - **Read** -- `patrol_agent.mcp_read_client.McpReadOnlyClient`, over the
   CockroachDB Cloud Managed MCP Server (`https://cockroachlabs.cloud/mcp`,
@@ -19,10 +19,44 @@ so a caller gets one exception type to handle: on any MCP failure
 (connect, timeout, tool-level error) it logs once and returns
 `PatrolSignals(degraded=True)` with empty lists instead of raising --
 PRD-03 functional requirement 6's "skip the round, don't write partial
-data" degradation. This repo does not yet call `write_client` from a
-degraded round (there's nothing to call it *with* -- Bedrock parsing is
-PRD-04), but the split is what makes that guarantee possible: nothing in
-this package writes as a side effect of a read.
+data" degradation.
+
+## Patrol round orchestration (PRD-04)
+
+`patrol_agent.patrol_loop.run_patrol_round` is the main loop, wired
+together in `patrol_agent.app.patrol_handler` (the Lambda entry point
+EventBridge invokes):
+
+1. `PatrolMemoryGateway.gather_signals` reads the last `window_minutes` of
+   `request_logs` once for the round. If the MCP channel is down, the
+   round is skipped entirely (`RoundSummary(degraded=True)`).
+2. `patrol_agent.heuristics.flag_suspicious_ips` groups those logs by
+   `src_ip` and keeps only IPs with a frequency spike or an
+   attack-shaped status code/payload -- a cheap pre-filter so every IP in
+   the window doesn't cost an embedding call plus a Bedrock call.
+3. Per suspicious IP: embed a summary of its rows
+   (`patrol_agent.embeddings.embed_text`), recall similar
+   `attack_signatures` and this IP's `agent_episodes` history over the
+   read channel, and assemble a prompt (`patrol_agent.prompt_builder`)
+   combining raw logs + recalled attack signatures + episodic memory +
+   static business rules about the demo app's endpoints.
+4. `patrol_agent.bedrock_judge.BedrockJudge` calls Bedrock Claude's
+   Converse API with `toolChoice` pinned to a single
+   `emit_patrol_verdict` tool, so the response is always the structured
+   `{ip, risk_level, attack_type, reasoning, action}` schema PRD-04 asks
+   for -- never free text to parse.
+5. `_dispatch_verdict` branches on `risk_level`: `normal` writes nothing;
+   `low` writes one `agent_episodes` row; `high` executes the disposal
+   action from Claude's `action.type` (`blacklist_temporary`,
+   `blacklist_permanent`, `rate_limit`, `lock_account`, or `task_queue`)
+   via `write_client`, then writes `alert_log` and `agent_episodes`. A
+   `block_until = NULL` blacklist row is this codebase's convention for
+   "permanent" -- PRD-05's gateway lookup should honor `block_until IS
+   NULL OR block_until > now()`.
+
+Every per-IP step (embedding, MCP reads, Bedrock call, disposal write) is
+wrapped so one IP's failure is logged and skipped rather than aborting the
+rest of the round or the next EventBridge cycle.
 
 ## MCP tool names -- resolved spike (PRD-03 functional requirement 1)
 
@@ -55,21 +89,29 @@ Console-generated config snippet, not just the public docs used here):
 
 ```
 patrol_agent/
-  config.py          McpConfig / CrdbWriteConfig, read from env vars
-  errors.py           McpUnavailableError, CrdbWriteError
+  config.py          McpConfig / CrdbWriteConfig / BedrockConfig / PatrolConfig
+  errors.py           McpUnavailableError, CrdbWriteError, BedrockJudgeError
   sql_literals.py      Safe literal quoting for the MCP read-only tool
   mcp_read_client.py   Read channel (mcp SDK imported lazily, see below)
   write_client.py      Write channel (psycopg2 imported lazily)
   memory_gateway.py     Combines the three reads with degrade-on-failure
+  embeddings.py         Query-time Titan embedding wrapper (PRD-04)
+  heuristics.py          Suspicious-IP pre-filter over a log window (PRD-04)
+  prompt_builder.py       Static business rules + verdict tool schema + prompt assembly (PRD-04)
+  bedrock_judge.py         Bedrock Converse tool-use call + verdict parsing (PRD-04)
+  patrol_loop.py            run_patrol_round: ties everything above together (PRD-04)
+  app.py                     Lambda entry point EventBridge invokes (PRD-04)
 sql/
   patrol_write_role.sql  Least-privilege role/grants for the write channel
-tests/                Unit tests against fakes -- no live MCP or CRDB needed
+template.yaml         SAM template: PatrolAgentLambda + EventBridge Scheduler rule
+tests/                Unit tests against fakes -- no live MCP, CRDB, or Bedrock needed
 ```
 
-`mcp` and `psycopg2` are imported inside the functions that need them
-(`_default_session_factory`, `CrdbWriteClient.connect`), not at module
-load time, so the rest of the package -- and all the tests -- stay usable
-without either driver installed. Same convention as
+`mcp`, `psycopg2`, and `boto3` are imported inside the functions that need
+them (`_default_session_factory`, `CrdbWriteClient.connect`,
+`embed_text`, `BedrockJudge.__init__`), not at module load time, so the
+rest of the package -- and all the tests -- stay usable without any driver
+installed. Same convention as
 `services/demo-target-app/demo_target_app/db.py`.
 
 ## Configuration
@@ -94,6 +136,16 @@ pattern as `demo-target-app`'s `CRDB_*` vars):
 | `CRDB_WRITE_USER` | required |
 | `CRDB_WRITE_PASSWORD` | required |
 | `CRDB_WRITE_SSLMODE` | `verify-full` |
+
+Bedrock and patrol-round tuning:
+
+| Env var | Default |
+|---|---|
+| `BEDROCK_MODEL_ID` | `anthropic.claude-3-5-sonnet-20241022-v2:0` (override once the model actually approved under PRD-00 is known) |
+| `PATROL_WINDOW_MINUTES` | `5` |
+| `PATROL_TOP_K` | `5` |
+| `PATROL_IP_HISTORY_LIMIT` | `20` |
+| `PATROL_HIGH_FREQUENCY_THRESHOLD` | `20` |
 
 ## Local development
 
@@ -135,3 +187,27 @@ steps as manual:
 5. Point `MCP_URL` at an unreachable host and confirm
    `PatrolMemoryGateway.gather_signals` returns `degraded=True` with a
    logged reason instead of raising.
+
+## Manual verification against a live cluster + Bedrock (PRD-04 acceptance criteria)
+
+Also needs live Bedrock model access (see PRD-00) in addition to the CRDB
+cluster and MCP endpoint above:
+
+1. Deploy `template.yaml` (or invoke `patrol_agent.app.patrol_handler`
+   locally with env vars set) and confirm one full round -- read logs,
+   recall, prompt assembly, Bedrock verdict -- completes without error
+   against seeded traffic.
+2. Run it against 10 different suspicious-request fixtures and confirm
+   `BedrockJudge.judge` never raises `BedrockJudgeError` for a
+   well-formed request (the forced `toolChoice` is what should guarantee
+   this; a failure here means the tool schema needs adjusting).
+3. Send the same IP through two patrol rounds with an escalating pattern
+   (e.g. more failed logins the second time) and check CloudWatch logs
+   for the `patrol_prompt_assembled` / `patrol_verdict` lines: the second
+   round's prompt should include the first round's `agent_episodes` row,
+   and `reasoning` should reference it (PRD-04's core acceptance
+   criterion for Agentic Memory Design).
+4. Confirm all three branches fire on the right input: a clean IP stays
+   `normal` (no writes), a scan/probe pattern lands `low` (one
+   `agent_episodes` row, no disposal write), and an obvious attack
+   pattern lands `high` (disposal write + `alert_log` + `agent_episodes`).
