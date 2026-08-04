@@ -13,6 +13,9 @@ class FakeRepository:
     def __init__(self, accounts=None):
         self.accounts = {a["user_id"]: dict(a) for a in (accounts or [])}
         self.request_logs = []
+        self.blacklisted_ips = set()
+        self.rate_limits = {}  # ip -> limit_per_min
+        self.recent_request_counts = {}  # ip -> count, set directly by tests
 
     def log_request(self, **fields):
         self.request_logs.append(fields)
@@ -38,6 +41,15 @@ class FakeRepository:
             "locked": locked,
             "locked_reason": locked_reason,
         }
+
+    def is_ip_blacklisted(self, ip):
+        return ip in self.blacklisted_ips
+
+    def get_active_rate_limit(self, ip):
+        return self.rate_limits.get(ip)
+
+    def count_recent_requests(self, ip, window_seconds=60):
+        return self.recent_request_counts.get(ip, 0)
 
 
 @pytest.fixture
