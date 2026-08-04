@@ -6,11 +6,12 @@ handler only checks credentials and respects a lock already placed by that
 downstream process.
 """
 from .. import http
-from ..middleware import logged
+from ..middleware import gated, logged
 from ..seed_accounts import WEAK_CREDENTIALS
 
 
 @logged
+@gated
 def handle(event, context, repo):
     body = http.parse_json_body(event)
     username = body.get("username", "")

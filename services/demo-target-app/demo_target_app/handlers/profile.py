@@ -6,10 +6,11 @@ script (docs/prd/PRD-08) walks: request /profile?id=u-1001, then
 /profile?id=u-1002, and read data that isn't yours.
 """
 from .. import http
-from ..middleware import logged
+from ..middleware import gated, logged
 
 
 @logged
+@gated
 def handle(event, context, repo):
     user_id = http.query_params(event).get("id")
     if not user_id:

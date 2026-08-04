@@ -16,13 +16,20 @@ Every request, regardless of outcome, is written to `request_logs`
 (schema: `docs/prd/PRD-01-crdb-schema-memory.md`) so it becomes input to the
 patrol agent's next pass.
 
+Every handler is also gated (PRD-05): before it runs, the request's source
+IP is checked directly against `ip_blacklist`/`ip_rate_limit` (no MCP, no
+patrol-agent round-trip). A blacklisted IP gets an immediate 403; an IP over
+its assigned `limit_per_min` gets a 429. This is the millisecond-latency
+layer that covers the gap between attacks and the patrol agent's next
+5-minute batch pass -- see `docs/01-architecture.md` section 2.5.
+
 ## Layout
 
 ```
 demo_target_app/
   db.py          CockroachRepository -- the only place that talks to psycopg2
   http.py        API Gateway event helpers
-  middleware.py  @logged decorator, writes request_logs around every handler
+  middleware.py  @logged (request_logs) and @gated (blacklist/rate-limit) decorators
   seed_accounts.py
   handlers/      one module per endpoint
   app.py         Lambda entry points (one per SAM function)
