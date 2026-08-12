@@ -29,7 +29,8 @@ def source_ip(event):
     try:
         return event["requestContext"]["identity"]["sourceIp"]
     except (KeyError, TypeError):
-        return event.get("headers", {}).get("X-Forwarded-For", "unknown")
+        headers = event.get("headers") or {}
+        return headers.get("X-Forwarded-For", "unknown")
 
 
 def user_agent(event):
