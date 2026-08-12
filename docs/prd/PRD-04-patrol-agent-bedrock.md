@@ -1,5 +1,7 @@
 # PRD-04：Patrol Agent（Bedrock 推理循环）
 
+> **状态：✅ 已完成**（D10 链式入侵关联分析的"加强项"未做）—— `services/patrol-agent`（commit `6874462`）。
+
 ## 目标
 
 实现整个项目的"大脑"：EventBridge 定时触发的 Lambda，读日志 + 召回记忆 → 组装 prompt → Bedrock Claude 结构化推理 → 输出处置指令。这是全项目工作量最大、也是评委最关注的模块（Agentic Memory Design + Technical Implementation 两项评分的核心证据都在这里）。

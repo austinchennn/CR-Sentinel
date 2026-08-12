@@ -1,5 +1,7 @@
 # PRD-09：可观测性 & 生产就绪加固
 
+> **状态：🟡 部分完成** —— 各服务的重试/降级处理已经在 PRD-03/04 里实现（MCP 失败降级、per-IP 隔离、写入失败回滚，见 `patrol_agent/memory_gateway.py`/`patrol_loop.py`/`write_client.py`），但 IAM 最小权限收紧、CloudWatch 指标看板、ccloud 审计日志展示等基础设施层面的加固工作尚未开始。
+
 ## 目标
 
 把项目从"能跑的 demo"补齐到"体现生产思考"的程度，直接对应 Production Readiness 评分项：安全性、可观测性、可扩展性、失败处理。这一步不是锦上添花，是评委明确会打分的项目。

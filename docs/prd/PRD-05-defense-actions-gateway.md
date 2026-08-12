@@ -1,5 +1,7 @@
 # PRD-05：自动处置动作 + 网关拦截
 
+> **状态：✅ 已完成** —— `services/demo-target-app`（commit `22e5a86`；处置动作写入见 PRD-04 commit `6874462` 的 `patrol_loop.py`/`write_client.py`）。
+
 ## 目标
 
 完成"检测 → 处置 → 拦截"的闭环最后一环：AI 判定高危后，自动写入黑名单/限流/锁账号，且靶场应用的 API Gateway 层要真正读这些表并拒绝请求。这是证明 CR-Sentinel 不只是"发现"而是"发现 + 自动执行防御"的关键 PRD。
