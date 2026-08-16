@@ -9,8 +9,15 @@ Bedrock at all -- there's nothing useful to reason about without logs.
 """
 import logging
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Optional
 
 from .errors import McpUnavailableError
+
+if TYPE_CHECKING:
+    # Deferred to avoid a cycle: interfaces.py imports PatrolSignals from
+    # this module for SignalsGateway's return type, so this module can only
+    # reach back for ReadClient under TYPE_CHECKING, never at import time.
+    from .interfaces import ReadClient
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +32,10 @@ class PatrolSignals:
 
 
 class PatrolMemoryGateway:
-    def __init__(self, read_client):
+    def __init__(self, read_client: "ReadClient"):
         self._read = read_client
 
-    def gather_signals(self, *, minutes=5, suspicious_embedding=None, ip=None, top_k=5):
+    def gather_signals(self, *, minutes=5, suspicious_embedding: Optional[list] = None, ip: Optional[str] = None, top_k=5) -> PatrolSignals:
         try:
             logs = self._read.read_recent_logs(minutes=minutes)
             similar_attacks = (

@@ -19,9 +19,12 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from . import alerting, heuristics, prompt_builder
+from .bedrock_judge import Verdict
 from .errors import BedrockJudgeError, CrdbWriteError, McpUnavailableError
+from .interfaces import AlertPublisher, EmbedFn, Judge, ReadClient, SignalsGateway, WriteClient
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +44,12 @@ class RoundSummary:
 
 def run_patrol_round(
     *,
-    memory_gateway,
-    read_client,
-    write_client,
-    judge,
-    embed_fn,
-    alert_publisher=None,
+    memory_gateway: SignalsGateway,
+    read_client: ReadClient,
+    write_client: WriteClient,
+    judge: Judge,
+    embed_fn: EmbedFn,
+    alert_publisher: Optional[AlertPublisher] = None,
     window_minutes=5,
     top_k=5,
     ip_history_limit=20,
@@ -88,7 +91,7 @@ def run_patrol_round(
     return RoundSummary(logs_read=len(signals.logs), suspicious_ip_count=len(suspicious), verdicts=verdicts)
 
 
-def _judge_one_ip(*, ip, ip_logs, read_client, judge, embed_fn, top_k, ip_history_limit):
+def _judge_one_ip(*, ip, ip_logs, read_client: ReadClient, judge: Judge, embed_fn: EmbedFn, top_k, ip_history_limit) -> Optional[Verdict]:
     try:
         query_text = heuristics.summarize_for_embedding(ip_logs)
         embedding = embed_fn(query_text)
@@ -114,7 +117,7 @@ def _judge_one_ip(*, ip, ip_logs, read_client, judge, embed_fn, top_k, ip_histor
         return None
 
 
-def _dispatch_verdict(verdict, *, write_client, embed_fn, alert_publisher=None):
+def _dispatch_verdict(verdict: Verdict, *, write_client: WriteClient, embed_fn: EmbedFn, alert_publisher: Optional[AlertPublisher] = None):
     if verdict.risk_level == "normal":
         return
 
@@ -145,7 +148,7 @@ def _dispatch_verdict(verdict, *, write_client, embed_fn, alert_publisher=None):
         logger.warning("patrol_write_failed ip=%s risk_level=%s", verdict.ip, verdict.risk_level, exc_info=exc)
 
 
-def _publish_alert(alert_publisher, write_client, *, alert_id, ip, subject, body):
+def _publish_alert(alert_publisher: Optional[AlertPublisher], write_client: WriteClient, *, alert_id, ip, subject, body):
     """SNS publish + marking `alert_log.sent` is deliberately its own
     try/except, separate from the outer CrdbWriteError handling in
     `_dispatch_verdict` -- a flaky SNS call or a failed `sent` update should
@@ -161,7 +164,7 @@ def _publish_alert(alert_publisher, write_client, *, alert_id, ip, subject, body
         logger.warning("patrol_alert_publish_failed ip=%s alert_id=%s", ip, alert_id, exc_info=exc)
 
 
-def _execute_disposal_action(verdict, action, action_type, *, write_client):
+def _execute_disposal_action(verdict: Verdict, action, action_type, *, write_client: WriteClient):
     now = datetime.now(timezone.utc)
 
     if action_type == "blacklist_temporary":

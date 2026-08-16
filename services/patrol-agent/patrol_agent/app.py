@@ -12,6 +12,7 @@ from .alerting import SnsAlertPublisher
 from .bedrock_judge import BedrockJudge
 from .config import BedrockConfig, CrdbWriteConfig, McpConfig, PatrolConfig, SnsConfig
 from .embeddings import embed_text
+from .interfaces import AlertPublisher, WriteClient
 from .mcp_read_client import McpReadOnlyClient
 from .memory_gateway import PatrolMemoryGateway
 from .patrol_loop import run_patrol_round
@@ -20,18 +21,18 @@ from .write_client import CrdbWriteClient
 logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
-_write_client = None
-_alert_publisher = None
+_write_client: WriteClient = None
+_alert_publisher: AlertPublisher = None
 
 
-def _get_write_client():
+def _get_write_client() -> WriteClient:
     global _write_client
     if _write_client is None:
         _write_client = CrdbWriteClient.connect(CrdbWriteConfig.from_env())
     return _write_client
 
 
-def _get_alert_publisher():
+def _get_alert_publisher() -> AlertPublisher:
     global _alert_publisher
     if _alert_publisher is None:
         _alert_publisher = SnsAlertPublisher.connect(SnsConfig.from_env())
