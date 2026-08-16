@@ -7,12 +7,13 @@ request to happen and land in request_logs, not to persist across cold
 starts.
 """
 from .. import http
-from ..middleware import logged
+from ..middleware import gated, logged
 
 _COMMENTS = []
 
 
 @logged
+@gated
 def handle(event, context, repo):
     method = event.get("httpMethod", "GET")
 

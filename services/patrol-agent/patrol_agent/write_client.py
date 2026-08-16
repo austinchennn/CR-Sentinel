@@ -92,9 +92,17 @@ class CrdbWriteClient:
         )
 
     def write_alert(self, severity, message):
+        alert_id = str(uuid.uuid4())
         self._execute(
             "INSERT INTO alert_log (id, severity, message) VALUES (%s, %s, %s)",
-            (str(uuid.uuid4()), severity, message),
+            (alert_id, severity, message),
+        )
+        return alert_id
+
+    def mark_alert_sent(self, alert_id):
+        self._execute(
+            "UPDATE alert_log SET sent = true WHERE id = %s",
+            (alert_id,),
         )
 
     def _execute(self, statement, params):

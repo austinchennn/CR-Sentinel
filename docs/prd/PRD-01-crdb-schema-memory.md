@@ -1,5 +1,7 @@
 # PRD-01：CockroachDB Schema & Agentic Memory 数据模型
 
+> **状态：✅ 已完成** —— `services/crdb-schema`（commit `0808926`）。
+
 ## 目标
 
 把"CockroachDB 是 agent 的持久记忆层"这个核心叙事落地成具体 schema：日志、语义记忆（向量）、情景记忆（episodes）、世界状态记忆（黑名单/限流）分层清晰，且都建好向量索引。这是整个项目里对 **Agentic Memory Design** 评分项最直接的支撑。

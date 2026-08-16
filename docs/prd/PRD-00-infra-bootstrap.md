@@ -1,5 +1,7 @@
 # PRD-00：Infra & 账号 Bootstrap
 
+> **状态：⬜ 未确认** —— 这类工作主要是账号配置/控制台操作，仓库里没有对应 commit，无法仅从代码判断完成情况，需要人工确认（见 [docs/03-open-issues.md](../03-open-issues.md)）。
+
 ## 目标
 
 打通 AWS + CockroachDB Cloud 的账号、权限、IaC 骨架，确保后续所有 PRD 都有干净的地基可用，且 Bedrock Claude 模型访问这个最容易卡进度的审批项在 Day 1 就启动。

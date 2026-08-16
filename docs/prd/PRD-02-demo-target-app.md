@@ -1,5 +1,7 @@
 # PRD-02：Demo 靶场应用
 
+> **状态：✅ 已完成** —— `services/demo-target-app`（commit `719c6d9`；网关拦截部分见 PRD-05 commit `22e5a86`）。
+
 ## 目标
 
 搭一个"故意有业务层漏洞"的轻量 Web 应用，作为攻击剧本的靶场，同时是比赛要求的 functional demo app 的一部分。所有请求同步落日志到 CockroachDB，成为 PatrolAgentLambda 的原始输入。

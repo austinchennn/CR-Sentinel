@@ -8,8 +8,9 @@ reuses them across invocations instead of reconnecting every 2-5 minutes.
 """
 import logging
 
+from .alerting import SnsAlertPublisher
 from .bedrock_judge import BedrockJudge
-from .config import BedrockConfig, CrdbWriteConfig, McpConfig, PatrolConfig
+from .config import BedrockConfig, CrdbWriteConfig, McpConfig, PatrolConfig, SnsConfig
 from .embeddings import embed_text
 from .mcp_read_client import McpReadOnlyClient
 from .memory_gateway import PatrolMemoryGateway
@@ -20,6 +21,7 @@ logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 _write_client = None
+_alert_publisher = None
 
 
 def _get_write_client():
@@ -27,6 +29,13 @@ def _get_write_client():
     if _write_client is None:
         _write_client = CrdbWriteClient.connect(CrdbWriteConfig.from_env())
     return _write_client
+
+
+def _get_alert_publisher():
+    global _alert_publisher
+    if _alert_publisher is None:
+        _alert_publisher = SnsAlertPublisher.connect(SnsConfig.from_env())
+    return _alert_publisher
 
 
 def patrol_handler(event, context):
@@ -41,6 +50,7 @@ def patrol_handler(event, context):
         write_client=_get_write_client(),
         judge=judge,
         embed_fn=embed_text,
+        alert_publisher=_get_alert_publisher(),
         window_minutes=patrol_config.window_minutes,
         top_k=patrol_config.top_k,
         ip_history_limit=patrol_config.ip_history_limit,

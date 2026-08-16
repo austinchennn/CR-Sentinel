@@ -1,5 +1,7 @@
 # PRD-03：MCP 连接层
 
+> **状态：✅ 已完成** —— `services/patrol-agent`（commit `fdd37cb`；独立写入通道见 PRD-04 commit `6874462`）。
+
 ## 目标
 
 封装 PatrolAgentLambda 与 CockroachDB 之间的两条通道：MCP（只读，日志查询 + 向量检索）和独立的最小权限 SQL 写入通道（处置动作）。这一层是"正确、安全地使用 CockroachDB 工具"这个评分点的直接体现，也是全项目里唯一需要格外小心权限边界的模块。

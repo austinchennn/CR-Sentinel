@@ -1,5 +1,7 @@
 # PRD-06：告警通知
 
+> **状态：✅ 已完成** —— `services/patrol-agent`（`patrol_agent/alerting.py` + `template.yaml` 的 `AlertTopic`/`AlertTopicEmailSubscription`；`patrol_loop.py` 的 `_publish_alert` 在写 `alert_log` 后发布 SNS 并更新 `sent`）。SNS Topic 的邮箱订阅确认（点击 SNS 发来的确认邮件）仍需部署后人工完成一次，属账号操作而非代码，见 README「Manual verification」章节。
+
 ## 目标
 
 高危攻击判定后，除了自动处置，还要有人工兜底的通知渠道，完成"AI 自动防御 + 人工可感知"的闭环，也是 rawmaterial 里明确提到的能力点。

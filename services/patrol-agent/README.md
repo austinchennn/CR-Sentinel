@@ -49,10 +49,33 @@ EventBridge invokes):
    `low` writes one `agent_episodes` row; `high` executes the disposal
    action from Claude's `action.type` (`blacklist_temporary`,
    `blacklist_permanent`, `rate_limit`, `lock_account`, or `task_queue`)
-   via `write_client`, then writes `alert_log` and `agent_episodes`. A
-   `block_until = NULL` blacklist row is this codebase's convention for
-   "permanent" -- PRD-05's gateway lookup should honor `block_until IS
-   NULL OR block_until > now()`.
+   via `write_client`, writes `alert_log`, publishes the same message to
+   SNS and marks the row `sent` (PRD-06, see below), then writes
+   `agent_episodes`. A `block_until = NULL` blacklist row is this
+   codebase's convention for "permanent" -- PRD-05's gateway lookup should
+   honor `block_until IS NULL OR block_until > now()`.
+
+## Alerting (PRD-06)
+
+`patrol_agent.alerting` is the human-facing half of a `high` verdict:
+
+- `format_alert_message(verdict, action_type)` builds one `(subject,
+  body)` pair -- the body becomes both `alert_log.message` (queryable
+  audit trail) and the SNS email (human-facing), so there's one source of
+  truth for "what does a security engineer need to know without
+  re-querying the DB": IP, risk level, attack type, action taken, AI
+  reasoning, timestamp.
+- `SnsAlertPublisher` wraps `boto3.client("sns").publish` against the
+  Topic ARN from `SNS_TOPIC_ARN` (the `AlertTopic` resource in
+  `template.yaml`, subscribed to `AlertEmail` at deploy time).
+
+In `_dispatch_verdict`, publishing to SNS and marking `alert_log.sent =
+true` happens in its own try/except, deliberately separate from the outer
+`CrdbWriteError` handling -- a flaky SNS call (or a failed `sent` update)
+must not skip the `agent_episodes` write that follows it. The `alert_log`
+row itself is already written by that point either way; `sent` only
+tracks whether the email side succeeded, so a re-run doesn't double-send
+a row that already went out.
 
 Every per-IP step (embedding, MCP reads, Bedrock call, disposal write) is
 wrapped so one IP's failure is logged and skipped rather than aborting the
@@ -89,7 +112,7 @@ Console-generated config snippet, not just the public docs used here):
 
 ```
 patrol_agent/
-  config.py          McpConfig / CrdbWriteConfig / BedrockConfig / PatrolConfig
+  config.py          McpConfig / CrdbWriteConfig / BedrockConfig / PatrolConfig / SnsConfig
   errors.py           McpUnavailableError, CrdbWriteError, BedrockJudgeError
   sql_literals.py      Safe literal quoting for the MCP read-only tool
   mcp_read_client.py   Read channel (mcp SDK imported lazily, see below)
@@ -99,11 +122,12 @@ patrol_agent/
   heuristics.py          Suspicious-IP pre-filter over a log window (PRD-04)
   prompt_builder.py       Static business rules + verdict tool schema + prompt assembly (PRD-04)
   bedrock_judge.py         Bedrock Converse tool-use call + verdict parsing (PRD-04)
+  alerting.py               SNS email alerting for high-risk verdicts (PRD-06)
   patrol_loop.py            run_patrol_round: ties everything above together (PRD-04)
   app.py                     Lambda entry point EventBridge invokes (PRD-04)
 sql/
   patrol_write_role.sql  Least-privilege role/grants for the write channel
-template.yaml         SAM template: PatrolAgentLambda + EventBridge Scheduler rule
+template.yaml         SAM template: PatrolAgentLambda + EventBridge Scheduler rule + SNS AlertTopic
 tests/                Unit tests against fakes -- no live MCP, CRDB, or Bedrock needed
 ```
 
@@ -146,6 +170,12 @@ Bedrock and patrol-round tuning:
 | `PATROL_TOP_K` | `5` |
 | `PATROL_IP_HISTORY_LIMIT` | `20` |
 | `PATROL_HIGH_FREQUENCY_THRESHOLD` | `20` |
+
+Alerting (PRD-06):
+
+| Env var | Default |
+|---|---|
+| `SNS_TOPIC_ARN` | required (the `AlertTopic` Output from `template.yaml`) |
 
 ## Local development
 
@@ -211,3 +241,24 @@ cluster and MCP endpoint above:
    `normal` (no writes), a scan/probe pattern lands `low` (one
    `agent_episodes` row, no disposal write), and an obvious attack
    pattern lands `high` (disposal write + `alert_log` + `agent_episodes`).
+
+## Manual verification against a live cluster + SNS (PRD-06 acceptance criteria)
+
+Also needs `AlertTopic` deployed and its email subscription confirmed
+(click the link SNS sends `AlertEmail` right after `sam deploy`):
+
+1. Trigger a `high` verdict (e.g. via the attack simulator once PRD-08
+   exists, or a manual `patrol_handler` invoke against seeded attack
+   traffic) and confirm the subscribed mailbox receives an email with the
+   subject and body `alerting.format_alert_message` produces.
+2. Query `alert_log` for that row and confirm `sent = true` after the
+   round completes.
+3. Re-run the same patrol round (or a round that revisits the same
+   `agent_episodes` history) and confirm no duplicate email arrives for
+   the already-sent row -- each `high` verdict produces exactly one new
+   `alert_log` row and one publish attempt, so there is nothing to
+   re-send.
+4. Point `SNS_TOPIC_ARN` at a topic the function's role can't publish to
+   and confirm the round still completes (disposal write + `agent_episodes`
+   still happen; only the email and `sent` flag are skipped), per the
+   `_publish_alert` isolation in `patrol_loop.py`.

@@ -92,6 +92,38 @@ class CockroachRepository:
             )
         self._conn.commit()
 
+    def is_ip_blacklisted(self, ip):
+        """PRD-05 functional requirement 6: block_until IS NULL is the
+        permanent-block convention the patrol agent writes (see
+        patrol_agent/patrol_loop.py's `_execute_disposal_action`)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM ip_blacklist WHERE ip = %s AND (block_until IS NULL OR block_until > now())",
+                (ip,),
+            )
+            return cur.fetchone() is not None
+
+    def get_active_rate_limit(self, ip):
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "SELECT limit_per_min FROM ip_rate_limit WHERE ip = %s AND expires_at > now()",
+                (ip,),
+            )
+            row = cur.fetchone()
+        return row[0] if row else None
+
+    def count_recent_requests(self, ip, window_seconds=60):
+        with self._conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT count(*) FROM request_logs
+                WHERE src_ip = %s AND ts > now() - (%s * INTERVAL '1 second')
+                """,
+                (ip, window_seconds),
+            )
+            row = cur.fetchone()
+        return row[0] if row else 0
+
 
 def _row_to_account(row):
     if row is None:
