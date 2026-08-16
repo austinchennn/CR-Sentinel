@@ -1,6 +1,6 @@
 # PRD-06：告警通知
 
-> **状态：⬜ 未开始**（前置依赖已就绪：PRD-04 的 `write_client.write_alert()` 已经在高危判定时写入 `alert_log`，但 SNS Topic 配置和邮件推送本身还没有实现）。
+> **状态：✅ 已完成** —— `services/patrol-agent`（`patrol_agent/alerting.py` + `template.yaml` 的 `AlertTopic`/`AlertTopicEmailSubscription`；`patrol_loop.py` 的 `_publish_alert` 在写 `alert_log` 后发布 SNS 并更新 `sent`）。SNS Topic 的邮箱订阅确认（点击 SNS 发来的确认邮件）仍需部署后人工完成一次，属账号操作而非代码，见 README「Manual verification」章节。
 
 ## 目标
 

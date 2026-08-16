@@ -20,7 +20,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from . import heuristics, prompt_builder
+from . import alerting, heuristics, prompt_builder
 from .errors import BedrockJudgeError, CrdbWriteError, McpUnavailableError
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,7 @@ def run_patrol_round(
     write_client,
     judge,
     embed_fn,
+    alert_publisher=None,
     window_minutes=5,
     top_k=5,
     ip_history_limit=20,
@@ -81,7 +82,7 @@ def run_patrol_round(
             "patrol_verdict ip=%s risk_level=%s attack_type=%s action=%r",
             verdict.ip, verdict.risk_level, verdict.attack_type, verdict.action,
         )
-        _dispatch_verdict(verdict, write_client=write_client, embed_fn=embed_fn)
+        _dispatch_verdict(verdict, write_client=write_client, embed_fn=embed_fn, alert_publisher=alert_publisher)
         verdicts.append(verdict)
 
     return RoundSummary(logs_read=len(signals.logs), suspicious_ip_count=len(suspicious), verdicts=verdicts)
@@ -113,7 +114,7 @@ def _judge_one_ip(*, ip, ip_logs, read_client, judge, embed_fn, top_k, ip_histor
         return None
 
 
-def _dispatch_verdict(verdict, *, write_client, embed_fn):
+def _dispatch_verdict(verdict, *, write_client, embed_fn, alert_publisher=None):
     if verdict.risk_level == "normal":
         return
 
@@ -129,10 +130,9 @@ def _dispatch_verdict(verdict, *, write_client, embed_fn):
     try:
         if verdict.risk_level == "high":
             _execute_disposal_action(verdict, action, write_client=write_client)
-            write_client.write_alert(
-                severity="high",
-                message=f"{verdict.ip} judged high risk ({verdict.attack_type}): {verdict.reasoning}",
-            )
+            subject, body = alerting.format_alert_message(verdict, action_type)
+            alert_id = write_client.write_alert(severity="high", message=body)
+            _publish_alert(alert_publisher, write_client, alert_id=alert_id, ip=verdict.ip, subject=subject, body=body)
         write_client.write_episode(
             ip=verdict.ip,
             risk_level=verdict.risk_level,
@@ -143,6 +143,22 @@ def _dispatch_verdict(verdict, *, write_client, embed_fn):
         )
     except CrdbWriteError as exc:
         logger.warning("patrol_write_failed ip=%s risk_level=%s", verdict.ip, verdict.risk_level, exc_info=exc)
+
+
+def _publish_alert(alert_publisher, write_client, *, alert_id, ip, subject, body):
+    """SNS publish + marking `alert_log.sent` is deliberately its own
+    try/except, separate from the outer CrdbWriteError handling in
+    `_dispatch_verdict` -- a flaky SNS call or a failed `sent` update should
+    never skip the `agent_episodes` write that comes right after this call.
+    The `alert_log` row from `write_alert` already exists either way; this
+    only controls whether it also gets emailed and marked sent."""
+    if alert_publisher is None:
+        return
+    try:
+        alert_publisher.publish(subject, body)
+        write_client.mark_alert_sent(alert_id)
+    except Exception as exc:
+        logger.warning("patrol_alert_publish_failed ip=%s alert_id=%s", ip, alert_id, exc_info=exc)
 
 
 def _execute_disposal_action(verdict, action, *, write_client):

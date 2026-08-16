@@ -59,13 +59,23 @@ def test_write_task_defaults_to_pending(fake_conn):
     assert params[1:] == ("harden_endpoint", {"path": "/admin"})
 
 
-def test_write_alert_inserts(fake_conn):
+def test_write_alert_inserts_and_returns_id(fake_conn):
     client = CrdbWriteClient(fake_conn)
-    client.write_alert("high", "IP 203.0.113.5 blacklisted for sqli")
+    alert_id = client.write_alert("high", "IP 203.0.113.5 blacklisted for sqli")
 
     statement, params = fake_conn.executed[0]
-    assert "alert_log" in statement
-    assert params[1:] == ("high", "IP 203.0.113.5 blacklisted for sqli")
+    assert "INSERT INTO alert_log" in statement
+    assert params == (alert_id, "high", "IP 203.0.113.5 blacklisted for sqli")
+
+
+def test_mark_alert_sent_updates_by_id(fake_conn):
+    client = CrdbWriteClient(fake_conn)
+    client.mark_alert_sent("alert-1")
+
+    statement, params = fake_conn.executed[0]
+    assert "UPDATE alert_log" in statement
+    assert "sent = true" in statement
+    assert params == ("alert-1",)
 
 
 def test_write_failure_rolls_back_and_raises_crdb_write_error(fake_conn):

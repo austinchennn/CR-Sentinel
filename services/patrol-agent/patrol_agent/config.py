@@ -67,6 +67,19 @@ class PatrolConfig:
 
 
 @dataclass(frozen=True)
+class SnsConfig:
+    # ARN of the SNS Topic provisioned by template.yaml (PRD-06), subscribed
+    # by the team's email address out of band via the console/CLI -- SAM
+    # can create the Topic + Subscription but the subscriber still has to
+    # click the confirmation link SNS emails, so that step stays manual.
+    topic_arn: str
+
+    @classmethod
+    def from_env(cls):
+        return cls(topic_arn=os.environ["SNS_TOPIC_ARN"])
+
+
+@dataclass(frozen=True)
 class CrdbWriteConfig:
     host: str
     port: str
