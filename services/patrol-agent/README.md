@@ -21,6 +21,22 @@ so a caller gets one exception type to handle: on any MCP failure
 PRD-03 functional requirement 6's "skip the round, don't write partial
 data" degradation.
 
+## Dependency inversion
+
+`patrol_agent.interfaces` declares `typing.Protocol` contracts (`ReadClient`,
+`WriteClient`, `Judge`, `AlertPublisher`, `SignalsGateway`, `EmbedFn`) for
+every collaborator `run_patrol_round` and `PatrolMemoryGateway` take as a
+parameter instead of constructing internally. Python's structural typing
+means the concrete adapters (`McpReadOnlyClient`, `CrdbWriteClient`,
+`BedrockJudge`, `SnsAlertPublisher`) already satisfy these without
+inheriting from or importing `interfaces.py` -- so do the `Fake*` test
+doubles in `tests/`. This is a documentation/type-checker layer over DI
+that already existed (`app.py`'s composition root builds every adapter and
+passes it in), not a behavior change: it exists so a new adapter -- a
+second `WriteClient` backed by a different store, say -- has one file that
+states the full contract instead of reverse-engineering it from
+`CrdbWriteClient`.
+
 ## Patrol round orchestration (PRD-04)
 
 `patrol_agent.patrol_loop.run_patrol_round` is the main loop, wired
@@ -112,6 +128,7 @@ Console-generated config snippet, not just the public docs used here):
 
 ```
 patrol_agent/
+  interfaces.py     typing.Protocol contracts for the DI seams below (ReadClient/WriteClient/Judge/AlertPublisher/SignalsGateway/EmbedFn)
   config.py          McpConfig / CrdbWriteConfig / BedrockConfig / PatrolConfig / SnsConfig
   errors.py           McpUnavailableError, CrdbWriteError, BedrockJudgeError
   sql_literals.py      Safe literal quoting for the MCP read-only tool

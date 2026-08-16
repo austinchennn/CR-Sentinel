@@ -7,11 +7,12 @@ code doesn't redeploy the others.
 """
 from .db import CockroachRepository
 from .handlers import admin, comments, login, profile
+from .interfaces import Repository
 
-_repo = None
+_repo: Repository = None
 
 
-def _get_repo():
+def _get_repo() -> Repository:
     global _repo
     if _repo is None:
         _repo = CockroachRepository.connect()
