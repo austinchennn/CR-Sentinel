@@ -90,6 +90,11 @@ def crdb_write_env(monkeypatch):
 
 
 @pytest.fixture
+def sns_env(monkeypatch):
+    monkeypatch.setenv("SNS_TOPIC_ARN", "arn:aws:sns:us-east-1:123456789012:test-alerts")
+
+
+@pytest.fixture
 def fake_boto3(monkeypatch):
     """Injects a fake `boto3` module into sys.modules so the lazy `import
     boto3` inside BedrockJudge.__init__/embed_text resolves without the
