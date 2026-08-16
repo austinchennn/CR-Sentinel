@@ -22,6 +22,7 @@ Globals:
         CRDB_WRITE_PASSWORD: !Ref CrdbWritePassword
         BEDROCK_MODEL_ID: !Ref BedrockModelId
         PATROL_WINDOW_MINUTES: !Ref PatrolWindowMinutes
+        SNS_TOPIC_ARN: !Ref AlertTopic
 
 Parameters:
   McpUrl:
@@ -53,8 +54,26 @@ Parameters:
     Type: Number
     Default: 5
     MinValue: 1
+  # PRD-06: mailbox that gets subscribed to AlertTopic below. SNS emails a
+  # confirmation link to this address after deploy -- someone has to click
+  # it before alerts actually arrive, SAM can't do that part.
+  AlertEmail:
+    Type: String
 
 Resources:
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AWS::StackName}-alerts"
+      DisplayName: CR-Sentinel high-risk alerts
+
+  AlertTopicEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
   PatrolAgentFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -67,6 +86,11 @@ Resources:
                 - bedrock:InvokeModel
                 - bedrock:Converse
               Resource: "*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref AlertTopic
       Events:
         PatrolSchedule:
           Type: ScheduleV2
@@ -79,3 +103,6 @@ Outputs:
   PatrolAgentFunctionArn:
     Description: ARN of PatrolAgentLambda, for CloudWatch Alarms (PRD-09) and manual invokes
     Value: !GetAtt PatrolAgentFunction.Arn
+  AlertTopicArn:
+    Description: ARN of the PRD-06 SNS alert topic, for adding further subscriptions (e.g. a second on-call mailbox)
+    Value: !Ref AlertTopic

@@ -22,7 +22,10 @@ GRANT INSERT, UPDATE ON TABLE ip_rate_limit TO patrol_agent_writer;
 GRANT UPDATE ON TABLE accounts TO patrol_agent_writer;
 GRANT INSERT ON TABLE agent_episodes TO patrol_agent_writer;
 GRANT INSERT ON TABLE task_queue TO patrol_agent_writer;
-GRANT INSERT ON TABLE alert_log TO patrol_agent_writer;
+-- INSERT for the initial alert_log row, UPDATE so PRD-06's SNS publish
+-- step can flip `sent` to true after a successful push (idempotency: a
+-- retry never re-sends a row that's already marked sent).
+GRANT INSERT, UPDATE ON TABLE alert_log TO patrol_agent_writer;
 
 -- Explicit revokes for auditability. CRDB denies by default, so these are
 -- no-ops on a fresh role -- they exist so this script stays correct (and
