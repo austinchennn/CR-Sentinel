@@ -14,12 +14,13 @@ agent to see, the same as any other request.
 import time
 
 from . import http
+from .interfaces import Repository
 
 RATE_LIMIT_WINDOW_SECONDS = 60
 
 
 def logged(handler):
-    def wrapped(event, context, repo):
+    def wrapped(event, context, repo: Repository):
         start = time.monotonic()
         try:
             response = handler(event, context, repo)
@@ -46,7 +47,7 @@ def logged(handler):
 
 
 def gated(handler):
-    def wrapped(event, context, repo):
+    def wrapped(event, context, repo: Repository):
         ip = http.source_ip(event)
 
         if repo.is_ip_blacklisted(ip):

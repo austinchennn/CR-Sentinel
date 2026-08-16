@@ -27,6 +27,7 @@ layer that covers the gap between attacks and the patrol agent's next
 
 ```
 demo_target_app/
+  interfaces.py  typing.Protocol Repository contract every handler/middleware receives
   db.py          CockroachRepository -- the only place that talks to psycopg2
   http.py        API Gateway event helpers
   middleware.py  @logged (request_logs) and @gated (blacklist/rate-limit) decorators
@@ -35,6 +36,14 @@ demo_target_app/
   app.py         Lambda entry points (one per SAM function)
 tests/           handler tests against an in-memory fake repository
 ```
+
+Every handler and middleware decorator takes `repo` as a parameter rather
+than importing `CockroachRepository` directly -- `interfaces.Repository`
+(a `typing.Protocol`) documents that contract in one place. `app.py`'s
+`_get_repo` composition root is the only place that constructs the
+concrete `CockroachRepository`; tests inject `tests/conftest.py`'s
+`FakeRepository` instead, which satisfies the same Protocol structurally
+without inheriting from it.
 
 ## Local development
 

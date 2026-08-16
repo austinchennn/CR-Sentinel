@@ -7,6 +7,7 @@ request to happen and land in request_logs, not to persist across cold
 starts.
 """
 from .. import http
+from ..interfaces import Repository
 from ..middleware import gated, logged
 
 _COMMENTS = []
@@ -14,7 +15,7 @@ _COMMENTS = []
 
 @logged
 @gated
-def handle(event, context, repo):
+def handle(event, context, repo: Repository):
     method = event.get("httpMethod", "GET")
 
     if method == "POST":
