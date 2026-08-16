@@ -21,7 +21,6 @@ RATE_LIMIT_WINDOW_SECONDS = 60
 def logged(handler):
     def wrapped(event, context, repo):
         start = time.monotonic()
-        body = http.parse_json_body(event)
         try:
             response = handler(event, context, repo)
         except Exception:
@@ -29,6 +28,7 @@ def logged(handler):
             raise
         finally:
             elapsed_ms = int((time.monotonic() - start) * 1000)
+            body = http.parse_json_body(event)
             repo.log_request(
                 src_ip=http.source_ip(event),
                 method=event.get("httpMethod", "UNKNOWN"),

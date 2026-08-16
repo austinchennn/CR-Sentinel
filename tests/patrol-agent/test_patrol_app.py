@@ -22,6 +22,7 @@ class _ToolResult:
 def _patch_write_client_connect(monkeypatch, fake_client):
     calls = []
     monkeypatch.setattr(app_mod, "_write_client", None)
+    monkeypatch.setattr(app_mod, "_alert_publisher", None)
     monkeypatch.setattr(
         app_mod.CrdbWriteClient, "connect", classmethod(lambda cls, config=None: calls.append(config) or fake_client)
     )
@@ -39,7 +40,7 @@ def test_get_write_client_connects_once_and_caches(monkeypatch, crdb_write_env):
 
 
 def test_patrol_handler_wires_env_config_into_a_full_round(
-    monkeypatch, mcp_env, bedrock_env, patrol_env, crdb_write_env, fake_boto3, fake_mcp_transport,
+    monkeypatch, mcp_env, bedrock_env, patrol_env, crdb_write_env, sns_env, fake_boto3, fake_mcp_transport,
 ):
     fake_mcp_transport.result = _ToolResult(content=[_TextBlock('{"rows": []}')])
     _patch_write_client_connect(monkeypatch, fake_client=types.SimpleNamespace())
@@ -53,7 +54,7 @@ def test_patrol_handler_wires_env_config_into_a_full_round(
 
 
 def test_patrol_handler_reports_degraded_when_mcp_is_down(
-    monkeypatch, mcp_env, bedrock_env, patrol_env, crdb_write_env, fake_boto3, fake_mcp_transport,
+    monkeypatch, mcp_env, bedrock_env, patrol_env, crdb_write_env, sns_env, fake_boto3, fake_mcp_transport,
 ):
     fake_mcp_transport.result = ConnectionRefusedError("mcp endpoint unreachable")
     _patch_write_client_connect(monkeypatch, fake_client=types.SimpleNamespace())

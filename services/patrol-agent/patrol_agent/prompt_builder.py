@@ -93,34 +93,33 @@ VERDICT_TOOL = {
 
 
 def build_messages(*, ip, logs, similar_attacks, ip_history):
-    lines = [f"# Patrol round for IP {ip}", "", "## Recent request_logs for this IP"]
-    for row in logs:
-        lines.append(_format_log_row(row))
-
-    lines.append("")
-    lines.append("## Semantically recalled attack_signatures (CockroachDB vector search)")
-    if similar_attacks:
-        for row in similar_attacks:
-            lines.append(
-                f"- [{row.get('category')}/{row.get('severity')}] {row.get('description')} "
-                f"(distance={row.get('distance')})"
-            )
-    else:
-        lines.append("- none recalled")
-
-    lines.append("")
-    lines.append("## agent_episodes history for this IP (your own past verdicts)")
-    if ip_history:
-        for row in ip_history:
-            lines.append(
-                f"- {row.get('ts')}: risk_level={row.get('risk_level')} "
-                f"attack_type={row.get('attack_type')} action_taken={row.get('action_taken')} "
-                f"-- {row.get('reasoning_summary')}"
-            )
-    else:
-        lines.append("- none -- first time this agent has seen this IP")
+    lines = [f"# Patrol round for IP {ip}"]
+    _append_section(lines, "## Recent request_logs for this IP", logs, _format_log_row)
+    _append_section(
+        lines,
+        "## Semantically recalled attack_signatures (CockroachDB vector search)",
+        similar_attacks,
+        _format_similar_attack,
+        empty_line="- none recalled",
+    )
+    _append_section(
+        lines,
+        "## agent_episodes history for this IP (your own past verdicts)",
+        ip_history,
+        _format_episode,
+        empty_line="- none -- first time this agent has seen this IP",
+    )
 
     return [{"role": "user", "content": [{"text": "\n".join(lines)}]}]
+
+
+def _append_section(lines, header, rows, formatter, *, empty_line=None):
+    lines.append("")
+    lines.append(header)
+    if rows:
+        lines.extend(formatter(row) for row in rows)
+    elif empty_line is not None:
+        lines.append(empty_line)
 
 
 def _format_log_row(row):
@@ -128,4 +127,19 @@ def _format_log_row(row):
         f"- {row.get('ts')} {row.get('method')} {row.get('path')} "
         f"query={row.get('query_params')!r} body={row.get('body_snippet')!r} "
         f"status={row.get('status_code')} user_id={row.get('user_id')} ua={row.get('user_agent')!r}"
+    )
+
+
+def _format_similar_attack(row):
+    return (
+        f"- [{row.get('category')}/{row.get('severity')}] {row.get('description')} "
+        f"(distance={row.get('distance')})"
+    )
+
+
+def _format_episode(row):
+    return (
+        f"- {row.get('ts')}: risk_level={row.get('risk_level')} "
+        f"attack_type={row.get('attack_type')} action_taken={row.get('action_taken')} "
+        f"-- {row.get('reasoning_summary')}"
     )
