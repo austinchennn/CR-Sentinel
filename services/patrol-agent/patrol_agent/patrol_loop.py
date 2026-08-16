@@ -129,7 +129,7 @@ def _dispatch_verdict(verdict, *, write_client, embed_fn, alert_publisher=None):
 
     try:
         if verdict.risk_level == "high":
-            _execute_disposal_action(verdict, action, write_client=write_client)
+            _execute_disposal_action(verdict, action, action_type, write_client=write_client)
             subject, body = alerting.format_alert_message(verdict, action_type)
             alert_id = write_client.write_alert(severity="high", message=body)
             _publish_alert(alert_publisher, write_client, alert_id=alert_id, ip=verdict.ip, subject=subject, body=body)
@@ -161,8 +161,7 @@ def _publish_alert(alert_publisher, write_client, *, alert_id, ip, subject, body
         logger.warning("patrol_alert_publish_failed ip=%s alert_id=%s", ip, alert_id, exc_info=exc)
 
 
-def _execute_disposal_action(verdict, action, *, write_client):
-    action_type = action.get("type", "none")
+def _execute_disposal_action(verdict, action, action_type, *, write_client):
     now = datetime.now(timezone.utc)
 
     if action_type == "blacklist_temporary":
