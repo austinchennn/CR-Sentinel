@@ -12,6 +12,7 @@ section 3). This is the schema `services/patrol-agent` (PRD-03) and
 migrations/
   001_core_tables.sql     All 8 tables + vector indexes, idempotent
 crdb_schema/
+  interfaces.py             EmbedFn -- the typing.Protocol-style alias for seed()'s embed_fn param
   config.py                 CrdbAdminConfig -- DDL/seeding credentials
   titan_embeddings.py        embed_text() wrapping Bedrock Titan V2
   attack_signature_seed_data.py   The 17 seed descriptions (5 categories)

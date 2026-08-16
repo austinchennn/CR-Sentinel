@@ -11,6 +11,7 @@ connection without the driver installed (see tests/test_seed_attack_signatures.p
 import logging
 
 from .attack_signature_seed_data import SEED_ATTACK_SIGNATURES
+from .interfaces import EmbedFn
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ UPSERT_SQL = """
 """
 
 
-def seed(conn, embed_fn, signatures=SEED_ATTACK_SIGNATURES):
+def seed(conn, embed_fn: EmbedFn, signatures=SEED_ATTACK_SIGNATURES):
     """embed_fn: str -> list[float]. Injected so tests can use a fake,
     deterministic embedder instead of calling Bedrock; production callers
     pass titan_embeddings.embed_text."""
