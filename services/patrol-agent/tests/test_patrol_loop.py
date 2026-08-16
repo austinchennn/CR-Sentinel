@@ -51,6 +51,7 @@ class FakeWriteClient:
     def __init__(self, fail_on=None):
         self.calls = []
         self._fail_on = fail_on or set()
+        self._next_alert_id = 0
 
     def _record(self, name, kwargs):
         if name in self._fail_on:
@@ -73,22 +74,40 @@ class FakeWriteClient:
         self._record("write_task", dict(task_type=task_type, payload=payload))
 
     def write_alert(self, severity, message):
-        self._record("write_alert", dict(severity=severity, message=message))
+        self._next_alert_id += 1
+        alert_id = f"alert-{self._next_alert_id}"
+        self._record("write_alert", dict(severity=severity, message=message, alert_id=alert_id))
+        return alert_id
+
+    def mark_alert_sent(self, alert_id):
+        self._record("mark_alert_sent", dict(alert_id=alert_id))
 
     def calls_named(self, name):
         return [kwargs for call_name, kwargs in self.calls if call_name == name]
+
+
+class FakeAlertPublisher:
+    def __init__(self, fail=False):
+        self.published = []
+        self._fail = fail
+
+    def publish(self, subject, message):
+        if self._fail:
+            raise RuntimeError("simulated SNS failure")
+        self.published.append((subject, message))
 
 
 def _suspicious_row(ip, status_code=403):
     return {"src_ip": ip, "status_code": status_code, "path": "/admin", "query_params": "", "body_snippet": "", "method": "GET"}
 
 
-def _run(logs, write_client, judge, *, similar=None, history=None, fail_read_recent_logs=False, fail_history_for=None):
+def _run(logs, write_client, judge, *, similar=None, history=None, fail_read_recent_logs=False, fail_history_for=None, alert_publisher=None):
     read_client = FakeReadClient(logs, similar=similar, history=history, fail_read_recent_logs=fail_read_recent_logs, fail_history_for=fail_history_for)
     gateway = PatrolMemoryGateway(read_client)
     embed_fn = lambda text: [0.1, 0.2, 0.3]
     summary = run_patrol_round(
-        memory_gateway=gateway, read_client=read_client, write_client=write_client, judge=judge, embed_fn=embed_fn
+        memory_gateway=gateway, read_client=read_client, write_client=write_client, judge=judge, embed_fn=embed_fn,
+        alert_publisher=alert_publisher,
     )
     return summary, read_client
 
@@ -301,6 +320,61 @@ def test_ip_with_bedrock_failure_is_skipped():
 
     assert summary.verdicts == []
     assert write_client.calls == []
+
+
+def test_high_verdict_publishes_alert_and_marks_sent():
+    logs = [_suspicious_row("1.1.1.1")]
+    judge = FakeJudge(verdicts_by_ip={
+        "1.1.1.1": Verdict(
+            ip="1.1.1.1", risk_level="high", attack_type="sqli", reasoning="union select attack",
+            action={"type": "blacklist_temporary", "block_hours": 12},
+        ),
+    })
+    write_client = FakeWriteClient()
+    alert_publisher = FakeAlertPublisher()
+
+    _run(logs, write_client, judge, alert_publisher=alert_publisher)
+
+    assert len(alert_publisher.published) == 1
+    subject, body = alert_publisher.published[0]
+    assert "1.1.1.1" in subject
+    assert "1.1.1.1" in body
+    alert = write_client.calls_named("write_alert")[0]
+    marked = write_client.calls_named("mark_alert_sent")[0]
+    assert marked["alert_id"] == alert["alert_id"]
+
+
+def test_high_verdict_without_alert_publisher_skips_publish_but_still_writes():
+    logs = [_suspicious_row("1.1.1.1")]
+    judge = FakeJudge(verdicts_by_ip={
+        "1.1.1.1": Verdict(
+            ip="1.1.1.1", risk_level="high", attack_type="sqli", reasoning="x",
+            action={"type": "blacklist_temporary"},
+        ),
+    })
+    write_client = FakeWriteClient()
+
+    _run(logs, write_client, judge, alert_publisher=None)
+
+    assert write_client.calls_named("write_alert")
+    assert write_client.calls_named("mark_alert_sent") == []
+
+
+def test_alert_publish_failure_does_not_block_episode_write():
+    logs = [_suspicious_row("1.1.1.1")]
+    judge = FakeJudge(verdicts_by_ip={
+        "1.1.1.1": Verdict(
+            ip="1.1.1.1", risk_level="high", attack_type="sqli", reasoning="x",
+            action={"type": "blacklist_temporary"},
+        ),
+    })
+    write_client = FakeWriteClient()
+    alert_publisher = FakeAlertPublisher(fail=True)
+
+    _run(logs, write_client, judge, alert_publisher=alert_publisher)
+
+    assert write_client.calls_named("mark_alert_sent") == []
+    assert write_client.calls_named("write_episode")
 
 
 def test_write_failure_is_swallowed_not_raised():
