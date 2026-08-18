@@ -12,27 +12,21 @@
 
 **修复**：`services/demo_target_app/http.py`，`source_ip()` 改为先 `headers = event.get("headers") or {}` 再取值，和 `user_agent()` 保持一致。
 
+### 2. 高危判定时，如果 episode embedding 失败，处置动作和告警会被一起跳过（已解耦）
+
+`patrol_agent/patrol_loop.py` 的 `_dispatch_verdict()` 原来是先算 `episode_embedding`，失败就直接 `return`，导致黑名单/限流/锁账号/告警全部被跳过。已按本文档之前记录的方案实现：把处置动作 + 告警的执行挪到一个独立的 `try/except CrdbWriteError` 块里，`episode_embedding` 的计算和 `write_episode` 调用拆到新的 `_write_episode()` 函数，单独用 `try/except` 包裹。现在 embedding 失败只会跳过 `agent_episodes` 这一条记忆记录，不影响已确认的 `high` 风险判定的实际拦截和告警。新增测试：`test_high_verdict_episode_embedding_failure_does_not_block_disposal_or_alert`、`test_disposal_write_failure_does_not_block_episode_write`（`services/patrol-agent/tests/test_patrol_loop.py`）。
+
+### 4. `patrol_agent/embeddings.py` 与 `crdb_schema/titan_embeddings.py` 手动重复、无一致性防护（已加测试守卫）
+
+两份文件是刻意的字节级复制（各服务独立部署为 Lambda，见两个模块的 docstring），`MODEL_ID`/`EMBEDDING_DIMENSIONS` 必须保持一致，否则向量召回质量会静默下降。之前只有代码注释提醒，没有自动检测。已加 `services/patrol-agent/tests/test_embeddings_consistency.py`：把 `services/crdb-schema` 插进 `sys.path`，直接比较两边的 `MODEL_ID`/`EMBEDDING_DIMENSIONS`，任一改动导致不一致会立刻在 `patrol-agent` 测试套件里报错。
+
+### 3. `accounts.username` 没有唯一约束（已加索引）
+
+`migrations/001_core_tables.sql` 里 `accounts` 表只有 `user_id` 是主键，`username` 没有唯一索引/约束，`db.py` 的 `get_account_by_username` 却假设唯一。已加 `migrations/002_accounts_username_unique.sql`：`CREATE UNIQUE INDEX IF NOT EXISTS accounts_username_key ON accounts (username);`，独立迁移文件，不改动已跑过的 001。新增测试确认种子数据（`seed_accounts.py`）里没有重复用户名，迁移可以安全应用（`services/crdb-schema/tests/test_migration_accounts_username_unique.py`）。
+
 ## 待决问题（需要你确认，未擅自改动逻辑）
 
-### 1. 高危判定时，如果 episode embedding 失败，处置动作和告警会被一起跳过
-
-`patrol_agent/patrol_loop.py` 的 `_dispatch_verdict()`：
-
-```python
-try:
-    episode_embedding = embed_fn(verdict.reasoning or verdict.attack_type or verdict.ip)
-except Exception as exc:
-    logger.warning(...)
-    return   # <- 直接整体返回，disposal 和 alert 都不会执行
-```
-
-如果 Titan embedding 调用失败（比如限流、瞬时网络问题），即使这一轮 Claude 已经判定某 IP 是 `high` 风险，**黑名单/限流/锁账号等实际防御动作、以及告警，都不会执行**——只是被跳过并打一条 warning 日志。
-
-这符合 `patrol_loop.py` 模块注释里引用的 PRD-09 设计原则("宁可整轮跳过该项，不要写入不完整的处置记录")，看起来是刻意的"要么完整写入、要么完全不写"取舍，不是随手写错的判断。但从"这是一个自动防御产品"的角度看，让一次不相关的 embedding 服务抖动导致一次已确认的高危攻击完全不被拦截，是有实际风险的取舍。
-
-**需要你决定**：是否要把处置动作/告警和 episode 记忆写入解耦，让 embedding 失败只影响 `agent_episodes` 这一条记忆记录，不影响黑名单/限流/告警？如果要改，我可以直接实现（把 `episode_embedding` 的计算挪到 disposal action 之后，用 `try/except` 单独包裹，仅影响 `write_episode` 调用）。目前没有改动这块逻辑,因为这是一个产品行为决策，不是纯粹的代码缺陷。
-
-### 2. `BedrockConfig.model_id` 的默认值是占位符
+### 1. `BedrockConfig.model_id` 的默认值是占位符
 
 `patrol_agent/config.py`:
 
@@ -42,11 +36,7 @@ model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
 
 代码注释里已经写明"override once the actual approved model ID is known rather than assuming this one is granted"——也就是说这个默认值本身就是待确认项，取决于 PRD-00 里 Bedrock 模型访问审批实际批下来的是哪个模型。部署前需要确认并通过 `BEDROCK_MODEL_ID` 环境变量覆盖（如果批下来的不是这个 ID）。
 
-### 3. `accounts.username` 没有唯一约束
-
-`migrations/001_core_tables.sql` 里 `accounts` 表只有 `user_id` 是主键，`username` 没有唯一索引/约束。`db.py` 的 `get_account_by_username` 假设 username 唯一（`fetchone()` 只取第一条），种子数据（`seed_accounts.py`）里也确实没有重复用户名，但 schema 层面没有强制这一点。如果未来有非种子途径写入 `accounts`（比如注册流程),没有唯一约束会导致登录时随机拿到某一个同名账号。当前 demo 范围内不影响功能，是否需要加唯一索引取决于 `accounts` 表未来是否会有除种子脚本外的写入路径。
-
-### 4. PRD-00（Infra & 账号 Bootstrap）没有对应的实现 commit
+### 2. PRD-00（Infra & 账号 Bootstrap）没有对应的实现 commit
 
 `git log` 里 PRD-01 到 PRD-05 都能各自对应到一个 feature commit，但 PRD-00（AWS/CockroachDB Cloud 账号、IAM、IaC 骨架、Bedrock 模型访问审批）没有找到对应的仓库改动——这类工作大概率是账号配置/控制台操作,不体现为代码提交,所以无法仅从代码库判断它是否已经完成。已在 `docs/prd/` 里保留未标记状态,具体是否完成需要你确认(见下方"PRD 完成情况"章节)。
 

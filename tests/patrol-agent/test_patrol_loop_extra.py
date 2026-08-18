@@ -1,14 +1,14 @@
-"""Covers patrol_loop._dispatch_verdict's episode-embedding-failure branch
-(patrol_agent/patrol_loop.py lines ~120-124), which
-services/patrol-agent/tests/test_patrol_loop.py doesn't exercise: its own
-embedding-failure test only fails the *first* embed_fn call (the per-IP
-query embedding in _judge_one_ip), never the second one (the episode
-embedding in _dispatch_verdict, only reached for a non-normal verdict).
+"""Covers patrol_loop._dispatch_verdict/_write_episode's episode-embedding-
+failure branch (patrol_agent/patrol_loop.py), which
+services/patrol-agent/tests/test_patrol_loop.py's own embedding-failure
+test doesn't exercise the same way: that one only fails the *first*
+embed_fn call (the per-IP query embedding in _judge_one_ip), never the
+second one (the episode embedding, only reached for a non-normal verdict).
 
-See docs/03-open-issues.md #1: today a transient embedding failure at this
-point silently drops the disposal action + alert for a `high` verdict, not
-just the episode write. This test documents current behavior; it isn't an
-endorsement of it."""
+Per docs/03-open-issues.md #2 (fixed): a transient episode-embedding
+failure only drops the `agent_episodes` memory row now, not the disposal
+action or alert for a `high` verdict -- those two are independent failure
+domains."""
 from patrol_agent.bedrock_judge import Verdict
 from patrol_agent.errors import McpUnavailableError
 from patrol_agent.memory_gateway import PatrolMemoryGateway
@@ -64,7 +64,7 @@ def _row(ip):
     return {"src_ip": ip, "status_code": 403, "path": "/admin", "query_params": "", "body_snippet": "", "method": "GET"}
 
 
-def test_episode_embedding_failure_on_a_high_verdict_skips_disposal_and_alert_too():
+def test_episode_embedding_failure_on_a_high_verdict_does_not_skip_disposal_or_alert():
     verdict = Verdict(
         ip="1.1.1.1", risk_level="high", attack_type="sqli", reasoning="union select attack",
         action={"type": "blacklist_temporary", "block_hours": 12},
@@ -87,7 +87,10 @@ def test_episode_embedding_failure_on_a_high_verdict_skips_disposal_and_alert_to
     )
 
     assert len(summary.verdicts) == 1
-    assert write_client.calls == []
+    call_names = [name for name, _ in write_client.calls]
+    assert "write_blacklist" in call_names
+    assert "write_alert" in call_names
+    assert "write_episode" not in call_names
 
 
 def test_episode_embedding_failure_on_a_low_verdict_skips_the_episode_write():
