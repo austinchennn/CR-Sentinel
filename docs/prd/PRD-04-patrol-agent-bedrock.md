@@ -1,6 +1,6 @@
 # PRD-04：Patrol Agent（Bedrock 推理循环）
 
-> **状态：✅ 已完成**（D10 链式入侵关联分析的"加强项"未做）—— `services/patrol-agent`（commit `6874462`）。
+> **状态：✅ 已完成**（含 D10 链式入侵关联分析加强项）—— `services/patrol-agent`（commit `6874462`；链式入侵关联分析见 `heuristics.py` 的 `_touches_multiple_sensitive_paths`/`summarize_endpoint_diversity` + `prompt_builder.py` 的对应 prompt 更新）。
 
 ## 目标
 

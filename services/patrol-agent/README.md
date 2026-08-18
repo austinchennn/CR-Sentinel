@@ -47,15 +47,21 @@ EventBridge invokes):
    `request_logs` once for the round. If the MCP channel is down, the
    round is skipped entirely (`RoundSummary(degraded=True)`).
 2. `patrol_agent.heuristics.flag_suspicious_ips` groups those logs by
-   `src_ip` and keeps only IPs with a frequency spike or an
-   attack-shaped status code/payload -- a cheap pre-filter so every IP in
-   the window doesn't cost an embedding call plus a Bedrock call.
+   `src_ip` and keeps only IPs with a frequency spike, an attack-shaped
+   status code/payload, **or a chained-intrusion-shaped spread across
+   sensitive endpoints** (`/admin`+`/login`+`/profile` all touched by one
+   IP in one window -- PRD-04's D10 stretch goal: every individual row in
+   that sequence can look clean, so this is a property of the *set* of
+   paths touched, not any single request) -- a cheap pre-filter so every
+   IP in the window doesn't cost an embedding call plus a Bedrock call.
 3. Per suspicious IP: embed a summary of its rows
    (`patrol_agent.embeddings.embed_text`), recall similar
    `attack_signatures` and this IP's `agent_episodes` history over the
    read channel, and assemble a prompt (`patrol_agent.prompt_builder`)
-   combining raw logs + recalled attack signatures + episodic memory +
-   static business rules about the demo app's endpoints.
+   combining raw logs (prefixed with the IP's endpoint sequence, e.g.
+   `/admin -> /login -> /profile -> /admin`, so Claude's reasoning can
+   reference the chain directly) + recalled attack signatures + episodic
+   memory + static business rules about the demo app's endpoints.
 4. `patrol_agent.bedrock_judge.BedrockJudge` calls Bedrock Claude's
    Converse API with `toolChoice` pinned to a single
    `emit_patrol_verdict` tool, so the response is always the structured
