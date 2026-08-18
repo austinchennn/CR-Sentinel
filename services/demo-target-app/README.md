@@ -48,8 +48,9 @@ without inheriting from it.
 ## Local development
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -r ../../requirements-dev.txt
 python -m pytest -q
+mypy demo_target_app
 ```
 
 Tests run against `tests/conftest.py`'s `FakeRepository`, so they don't

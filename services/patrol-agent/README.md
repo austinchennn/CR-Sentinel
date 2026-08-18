@@ -203,8 +203,9 @@ Alerting (PRD-06):
 ## Local development
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -r ../../requirements-dev.txt
 python -m pytest -q
+mypy patrol_agent
 ```
 
 ## Setting up the write role

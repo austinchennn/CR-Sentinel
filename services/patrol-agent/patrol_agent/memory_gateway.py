@@ -28,7 +28,7 @@ class PatrolSignals:
     similar_attacks: list = field(default_factory=list)
     ip_history: list = field(default_factory=list)
     degraded: bool = False
-    degraded_reason: str = None
+    degraded_reason: Optional[str] = None
 
 
 class PatrolMemoryGateway:

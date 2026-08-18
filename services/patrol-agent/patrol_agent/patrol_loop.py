@@ -56,7 +56,7 @@ class RoundSummary:
     suspicious_ip_count: int = 0
     verdicts: list = field(default_factory=list)
     degraded: bool = False
-    degraded_reason: str = None
+    degraded_reason: Optional[str] = None
 
 
 def run_patrol_round(

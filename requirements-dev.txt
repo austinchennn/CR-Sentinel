@@ -1,0 +1,6 @@
+# Dev/CI-only tooling -- not a Lambda deployment dependency, so it's kept
+# separate from each services/*/requirements.txt (which only lists what
+# actually ships in that service's Lambda package).
+pytest>=8.0
+pytest-cov>=5.0
+mypy>=1.10
