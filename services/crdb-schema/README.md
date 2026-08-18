@@ -98,6 +98,7 @@ criteria actually require checking:
 ## Local development
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -r ../../requirements-dev.txt
 python -m pytest -q
+mypy crdb_schema
 ```

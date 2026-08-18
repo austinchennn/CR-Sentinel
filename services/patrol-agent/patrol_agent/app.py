@@ -7,6 +7,7 @@ as `demo_target_app/app.py`'s `_get_repo`, so a warm Lambda container
 reuses them across invocations instead of reconnecting every 2-5 minutes.
 """
 import logging
+from typing import Optional
 
 from .alerting import SnsAlertPublisher
 from .bedrock_judge import BedrockJudge
@@ -22,8 +23,8 @@ from .write_client import CrdbWriteClient
 logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
-_write_client: WriteClient = None
-_alert_publisher: AlertPublisher = None
+_write_client: Optional[WriteClient] = None
+_alert_publisher: Optional[AlertPublisher] = None
 _metrics = None
 
 

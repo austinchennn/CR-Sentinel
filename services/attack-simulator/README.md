@@ -61,7 +61,9 @@ tests/               Unit tests against a fake HTTP client -- no live network ne
 ## Local development
 
 ```bash
+pip install -r ../../requirements-dev.txt
 python -m pytest -q
+mypy attack_simulator
 ```
 
 Every scenario's `run()` takes an injectable `sleep_fn` (defaulting to

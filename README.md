@@ -1,5 +1,7 @@
 # CR-Sentinel
 
+[![CI](https://github.com/austinchennn/CR-Sentinel/actions/workflows/ci.yml/badge.svg)](https://github.com/austinchennn/CR-Sentinel/actions/workflows/ci.yml)
+
 **CR-Sentinel is a website security monitoring agent whose memory is CockroachDB.**
 
 Traditional WAFs and IDS only do string matching and fixed thresholds — they recognize
@@ -98,6 +100,7 @@ services/
   attack-simulator/     CLI attack scripts for self-testing and the demo video
 tests/                 Coverage-gap test suites, one per service (see tests/README.md)
 docs/                  Design docs, PRDs, open issues, TODO, production-readiness writeup, demo script (Chinese)
+.github/workflows/     CI: pytest + mypy for all five services on every push/PR
 ```
 
 Each `services/*` directory deploys as its own independent set of Lambdas (own
@@ -129,7 +132,9 @@ and the AWS SAM CLI.
    Agent Memory Timeline views. Full walkthrough: `docs/05-demo-script.md`.
 
 Every service also runs its own unit tests against fakes, no live cluster needed:
-`cd services/<name> && pip install -r requirements.txt && python -m pytest -q`.
+`cd services/<name> && pip install -r requirements.txt && python -m pytest -q`. CI
+(`.github/workflows/ci.yml`) runs this plus `mypy` for all five services, plus the
+coverage-gap suites under `tests/`, on every push and pull request.
 
 ## CockroachDB tools used
 

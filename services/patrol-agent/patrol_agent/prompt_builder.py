@@ -6,6 +6,7 @@ The demo target app's endpoint descriptions below (PRD-02) are the
 no baseline for what "normal" traffic to this specific app looks like, only
 generic web-attack knowledge.
 """
+from . import heuristics
 
 VERDICT_TOOL_NAME = "emit_patrol_verdict"
 
@@ -25,6 +26,14 @@ check. Sequential or enumerated id values from one IP is an IDOR/enumeration sig
 obfuscated <script> payloads or social-engineering links are the XSS/phishing signal.
 - GET /admin -- unauthenticated, always answers 200. Repeated probing of this or other unknown \
 paths is a scan/recon signal.
+
+Also watch for chained intrusion: a single IP's request sequence *within this round* moving \
+through recon (e.g. probing /admin) -> a successful weak-credential login -> data access to \
+accounts other than the one just logged into (IDOR) -> renewed recon. Every step in that chain \
+can look individually clean -- normal status codes, no attack-shaped characters -- so judge it \
+from the endpoint sequence given below for this IP, not from any single row. Classify this \
+pattern as attack_type "chained_intrusion" when it applies, and say so explicitly in your \
+reasoning.
 
 You are given, for one IP: its raw log rows from this patrol round, attack_signatures \
 semantically recalled from CockroachDB's vector index (your long-term memory of known attack \
@@ -51,7 +60,7 @@ VERDICT_TOOL = {
                     "risk_level": {"type": "string", "enum": list(RISK_LEVELS)},
                     "attack_type": {
                         "type": "string",
-                        "description": "e.g. sqli, xss, idor, bruteforce, phishing, scan, none",
+                        "description": "e.g. sqli, xss, idor, bruteforce, phishing, scan, chained_intrusion, none",
                     },
                     "reasoning": {
                         "type": "string",
@@ -94,6 +103,8 @@ VERDICT_TOOL = {
 
 def build_messages(*, ip, logs, similar_attacks, ip_history):
     lines = [f"# Patrol round for IP {ip}"]
+    if logs:
+        lines.append(f"Endpoint sequence this round: {heuristics.summarize_endpoint_diversity(logs)}")
     _append_section(lines, "## Recent request_logs for this IP", logs, _format_log_row)
     _append_section(
         lines,

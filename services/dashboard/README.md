@@ -74,8 +74,9 @@ tests/                Unit tests against fakes -- no live CRDB needed
 ## Local development
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -r ../../requirements-dev.txt
 python -m pytest -q
+mypy dashboard_api
 ```
 
 Tests run against `tests/conftest.py`'s `FakeConnection`/`FakeRepository`,

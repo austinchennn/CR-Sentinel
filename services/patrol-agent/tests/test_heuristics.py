@@ -81,3 +81,32 @@ def test_summarize_for_embedding_caps_row_count():
 
 def test_summarize_for_embedding_handles_empty_rows():
     assert heuristics.summarize_for_embedding([]) == "no request detail"
+
+
+def test_flags_ip_touching_three_sensitive_paths_even_with_clean_rows():
+    logs = [
+        _row(path="/admin", status_code=200),
+        _row(path="/login", status_code=200, method="POST"),
+        _row(path="/profile", status_code=200, query_params="id=u-1001"),
+    ]
+
+    suspicious = heuristics.flag_suspicious_ips(logs, high_frequency_threshold=20)
+
+    assert "203.0.113.5" in suspicious
+
+
+def test_does_not_flag_ip_touching_only_two_sensitive_paths():
+    logs = [
+        _row(path="/admin", status_code=200),
+        _row(path="/login", status_code=200, method="POST"),
+    ]
+
+    suspicious = heuristics.flag_suspicious_ips(logs, high_frequency_threshold=20)
+
+    assert suspicious == {}
+
+
+def test_summarize_endpoint_diversity_preserves_order():
+    logs = [_row(path="/admin"), _row(path="/login"), _row(path="/profile"), _row(path="/admin")]
+
+    assert heuristics.summarize_endpoint_diversity(logs) == "/admin -> /login -> /profile -> /admin"

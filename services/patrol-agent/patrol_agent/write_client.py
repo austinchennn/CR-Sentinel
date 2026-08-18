@@ -75,27 +75,53 @@ class CrdbWriteClient:
             (reason, user_id),
         )
 
-    def write_episode(self, *, ip, risk_level, attack_type, reasoning_summary, action_taken, embedding):
+    def write_episode(self, *, ip, risk_level, attack_type, reasoning_summary, action_taken, embedding, idempotency_key):
+        # ON CONFLICT (idempotency_key) DO NOTHING (PRD-09 functional
+        # requirement 5): idempotency_key is derived from the actual
+        # request_logs.id's judged this round (patrol_loop.py's
+        # _compute_round_idempotency_key), so a Lambda retry that re-judges
+        # the identical rows for this IP recognizes it as the same episode
+        # rather than inserting a duplicate memory row.
         self._execute(
             """
             INSERT INTO agent_episodes
-                (id, ip, risk_level, attack_type, reasoning_summary, action_taken, embedding)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                (id, ip, risk_level, attack_type, reasoning_summary, action_taken, embedding, idempotency_key)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (idempotency_key) DO NOTHING
             """,
-            (str(uuid.uuid4()), ip, risk_level, attack_type, reasoning_summary, action_taken, embedding),
+            (str(uuid.uuid4()), ip, risk_level, attack_type, reasoning_summary, action_taken, embedding, idempotency_key),
         )
 
-    def write_task(self, task_type, payload):
+    def write_task(self, task_type, payload, idempotency_key):
         self._execute(
-            "INSERT INTO task_queue (id, type, payload, status) VALUES (%s, %s, %s, 'pending')",
-            (str(uuid.uuid4()), task_type, payload),
+            """
+            INSERT INTO task_queue (id, type, payload, status, idempotency_key)
+            VALUES (%s, %s, %s, 'pending', %s)
+            ON CONFLICT (idempotency_key) DO NOTHING
+            """,
+            (str(uuid.uuid4()), task_type, payload, idempotency_key),
         )
 
-    def write_alert(self, severity, message):
+    def write_alert(self, severity, message, idempotency_key):
+        # Same ON CONFLICT DO NOTHING idempotency guard as write_episode.
+        # One known residual gap, deliberately accepted rather than solved
+        # with a more complex RETURNING-based upsert: on a duplicate key,
+        # the returned `alert_id` refers to a row that was *not* inserted
+        # (a different id already exists for that key), so a subsequent
+        # mark_alert_sent(alert_id) silently no-ops instead of updating the
+        # pre-existing row. That only matters if a retry follows a partial
+        # failure that already ran write_alert but not mark_alert_sent --
+        # a narrow window, and the row itself is never duplicated either
+        # way, which is what PRD-09's acceptance criterion actually asks
+        # for. See docs/06-production-readiness.md §4.
         alert_id = str(uuid.uuid4())
         self._execute(
-            "INSERT INTO alert_log (id, severity, message) VALUES (%s, %s, %s)",
-            (alert_id, severity, message),
+            """
+            INSERT INTO alert_log (id, severity, message, idempotency_key)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (idempotency_key) DO NOTHING
+            """,
+            (alert_id, severity, message, idempotency_key),
         )
         return alert_id
 

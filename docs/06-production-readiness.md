@@ -56,35 +56,39 @@ Secrets Manager（PRD-00 部署时注入，仓库里从不出现明文）。
 | `write_blacklist` | `INSERT ... ON CONFLICT (ip) DO UPDATE` | 幂等：重复判定同一 IP 为 high，只会更新已有行，不会重复 |
 | `write_rate_limit` | 同上，`ON CONFLICT (ip) DO UPDATE` | 幂等 |
 | `lock_account` | 纯 `UPDATE ... WHERE user_id = %s` | 天然幂等（重复执行终态相同） |
-| `write_episode` | **无**——每次 `INSERT`，`id` 是随机 `gen_random_uuid()` | **不幂等**，见下方"已知限制" |
-| `write_task` | 同上，纯 `INSERT` | 同上（PRD-09 验收标准没有明确要求这条，但风险类别相同） |
-| `write_alert` | 同上，纯 `INSERT`；`sent` 字段本身是给"是否已推送"做幂等标记的，不是给"是否已写入"做幂等 | 同上 |
+| `write_episode` | `INSERT ... ON CONFLICT (idempotency_key) DO NOTHING` | 幂等，见下方 |
+| `write_task` | 同上 | 幂等 |
+| `write_alert` | 同上，一处已知残余边界情况，见下方 | 基本幂等 |
 
-### 已知限制：Lambda 重试可能导致 `agent_episodes`（以及 `task_queue`/`alert_log`）重复写入
+### `agent_episodes`/`task_queue`/`alert_log` 的重试幂等性（已解决）
 
-PRD-09 验收标准 5 明确要求"重复触发同一轮巡检...`agent_episodes` 不产生重复/冲突记录"。目前
-`write_episode`/`write_task`/`write_alert` 都是无约束的 `INSERT`，如果 EventBridge Scheduler
-在一次 Lambda 调用超时/报错后重试整个 `patrol_handler`（`template.yaml` 的 `PatrolSchedule`
-没有显式关闭 `RetryPolicy`，走的是 EventBridge Scheduler 默认重试行为），且重试发生在上一次已经
-成功写完处置动作 **之后**，会产生重复的 `agent_episodes`/`task_queue`/`alert_log` 行。
+PRD-09 验收标准 5 要求"重复触发同一轮巡检...`agent_episodes` 不产生重复/冲突记录"。这三张表原来
+都是无约束的 `INSERT`，`id` 是随机 `gen_random_uuid()`——如果 EventBridge Scheduler 在一次
+Lambda 调用超时/报错后重试整个 `patrol_handler`，且重试发生在上一次已经成功写完处置动作**之后**，
+会产生重复行。
 
-**为什么没有直接修**：`ip_blacklist`/`ip_rate_limit` 能用 `ON CONFLICT (ip)` 幂等，是因为"同一个
-IP 只应该有一条生效记录"本身就是业务语义。但 `agent_episodes` 恰恰相反——**同一个 IP 在不同轮次
-产生多条不同记录，是这个项目最核心的"记忆时间线"叙事**（Dashboard 记忆时间线视图整个存在的意义）。
-如果用 `(ip, risk_level, attack_type, reasoning_summary)` 之类的内容做 `ON CONFLICT` 去重，会把
-"同一个 IP 连续两轮都判定为 high/sqli"这种合法的、应该被记录两次的场景，错误地合并成一条记录并
-覆盖时间戳——这比偶发的重试重复更糟，等于破坏了记忆时间线本身。
+**没有用内容做 `ON CONFLICT` 去重的原因**：`ip_blacklist`/`ip_rate_limit` 能用 `ON CONFLICT (ip)`
+幂等，是因为"同一个 IP 只应该有一条生效记录"本身就是业务语义。但 `agent_episodes` 恰恰相反——
+**同一个 IP 在不同轮次产生多条不同记录，是这个项目最核心的"记忆时间线"叙事**（Dashboard 记忆
+时间线视图整个存在的意义）。如果用 `(ip, risk_level, attack_type, reasoning_summary)` 之类的
+内容做 `ON CONFLICT` 去重，会把"同一个 IP 连续两轮都判定为 high/sqli"这种合法的、应该被记录
+两次的场景，错误地合并成一条记录——比偶发的重试重复更糟。
 
-真正正确的修法需要一个能跨重试保持稳定的幂等键（比如"这一轮巡检读到的 `request_logs.id` 集合的
-哈希"），但 `read_recent_logs` 用的是"过去 N 分钟"这种滑动窗口（`WHERE ts > now() - INTERVAL`），
-每次调用的 `now()` 都不同，两次重试实际读到的日志集合不保证完全一致，无法简单地用固定 key 去重。
-这是一个需要专门设计（比如引入显式的"巡检轮次" ID，由 EventBridge 传入或由 Lambda 自己生成并在
-重试间保持）的问题，不是加一个 `ON CONFLICT` 能解决的，超出这次加固的时间范围。
+**实际方案**：`patrol_loop.py` 的 `_compute_round_idempotency_key(ip, ip_logs)` 用"这一轮巡检
+实际判定用到的 `request_logs.id` 集合"（排序后取 SHA-256）作为幂等键，而不是墙钟时间——这些行一旦
+写入就不会再被修改/删除，所以同一次调用的重试如果读到完全相同的底层日志行，就会得到相同的 key。
+`migrations/003_disposal_write_idempotency.sql` 给 `agent_episodes`/`task_queue`/`alert_log`
+三张表都加了 `idempotency_key STRING` 列 + 唯一索引；`write_client.py` 三个方法的 `INSERT` 都改成
+`ON CONFLICT (idempotency_key) DO NOTHING`。
 
-**建议**：如果要正式解决，下一步是给 `patrol_handler` 加一层"本轮是否已处理过"的检查（比如在
-`agent_episodes` 加一个 `round_id` 列，`patrol_handler` 从 EventBridge 事件里取一个稳定的调用
-标识符，重试时复用同一个 `round_id`，`write_episode` 改成 `ON CONFLICT (round_id, ip) DO NOTHING`）。
-记入 `docs/04-todo.md`。
+**已知的、可接受的残余边界情况**（`write_alert`）：如果这个 key 已经存在（重试命中冲突），`INSERT`
+被跳过，但 `write_alert` 仍然返回这次生成的新 `alert_id`（并非实际存入表里的那个 id）——后续
+`mark_alert_sent(alert_id)` 会因为找不到匹配行而静默不生效。这只在"上一次尝试已经写完 `write_alert`
+但还没来得及跑 `mark_alert_sent` 就整体失败重试"这个窄窗口内出现，且**不会产生重复行**（PRD-09
+验收标准实际要求的是这一点）。要完全解决需要 `INSERT ... ON CONFLICT ... DO UPDATE ... RETURNING id`
+把语句改造成真正的 upsert-and-fetch，为了避免给 `_execute` 引入第二套"取返回值"的执行路径、以及
+连带修改两处测试用的 fake cursor，这次选择记录这个边界情况而不是引入这层复杂度，因为它不影响
+PRD-09 验收标准 5 实际要求的"无重复行"这个结果。
 
 ## 5. 双层防护说明
 

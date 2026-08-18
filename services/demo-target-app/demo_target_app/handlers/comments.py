@@ -10,7 +10,7 @@ from .. import http
 from ..interfaces import Repository
 from ..middleware import gated, logged
 
-_COMMENTS = []
+_COMMENTS: list = []
 
 
 @logged

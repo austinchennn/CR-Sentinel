@@ -20,6 +20,26 @@ def test_build_messages_includes_log_rows():
     assert "status=401" in text
 
 
+def test_build_messages_includes_endpoint_sequence():
+    logs = [
+        {"ts": "t1", "method": "GET", "path": "/admin", "status_code": 200},
+        {"ts": "t2", "method": "POST", "path": "/login", "status_code": 200},
+        {"ts": "t3", "method": "GET", "path": "/profile", "status_code": 200},
+    ]
+
+    messages = prompt_builder.build_messages(ip="203.0.113.5", logs=logs, similar_attacks=[], ip_history=[])
+
+    text = messages[0]["content"][0]["text"]
+    assert "Endpoint sequence this round: /admin -> /login -> /profile" in text
+
+
+def test_build_messages_omits_endpoint_sequence_when_no_logs():
+    messages = prompt_builder.build_messages(ip="203.0.113.5", logs=[], similar_attacks=[], ip_history=[])
+
+    text = messages[0]["content"][0]["text"]
+    assert "Endpoint sequence" not in text
+
+
 def test_build_messages_includes_recalled_signatures():
     similar = [{"category": "sqli", "severity": "high", "description": "union select", "distance": 0.1}]
 

@@ -5,11 +5,13 @@ Kept as separate entry points (rather than one router Lambda) so each route
 gets its own SAM function / IAM scoping, and so a change to one endpoint's
 code doesn't redeploy the others.
 """
+from typing import Optional
+
 from .db import CockroachRepository
 from .handlers import admin, comments, login, profile
 from .interfaces import Repository
 
-_repo: Repository = None
+_repo: Optional[Repository] = None
 
 
 def _get_repo() -> Repository:

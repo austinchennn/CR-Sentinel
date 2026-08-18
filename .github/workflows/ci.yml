@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - crdb-schema
+          - demo-target-app
+          - patrol-agent
+          - dashboard
+          - attack-simulator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-dev.txt
+          pip install -r services/${{ matrix.service }}/requirements.txt
+      - name: Run unit tests
+        working-directory: services/${{ matrix.service }}
+        run: python -m pytest -q
+
+  coverage-gap-tests:
+    name: coverage-gap tests (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Only these three services have a top-level tests/<service> suite
+        # -- see tests/README.md for why it's a separate tree from
+        # services/<service>/tests.
+        service: [crdb-schema, demo-target-app, patrol-agent]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-dev.txt
+          pip install -r services/${{ matrix.service }}/requirements.txt
+      - name: Run coverage-gap tests
+        working-directory: tests/${{ matrix.service }}
+        run: python -m pytest -q
+
+  typecheck:
+    name: mypy (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: crdb-schema
+            package: crdb_schema
+          - service: demo-target-app
+            package: demo_target_app
+          - service: patrol-agent
+            package: patrol_agent
+          - service: dashboard
+            package: dashboard_api
+          - service: attack-simulator
+            package: attack_simulator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements-dev.txt
+          pip install -r services/${{ matrix.service }}/requirements.txt
+      - name: Run mypy
+        working-directory: services/${{ matrix.service }}
+        run: python -m mypy ${{ matrix.package }}
