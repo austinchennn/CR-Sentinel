@@ -1,6 +1,6 @@
 # PRD-08：攻击模拟器 & 演示剧本
 
-> **状态：⬜ 未开始**。
+> **状态：✅ 已完成** —— `services/attack-simulator`（4 个场景脚本 + CLI）+ `docs/05-demo-script.md`（演示剧本文档）。验收标准里"等待一轮巡检、在 Dashboard/CloudWatch 看到符合预期的判定"这部分需要真实部署环境才能验证，见 `docs/05-demo-script.md`"已知限制"。
 
 ## 目标
 

@@ -1,0 +1,2 @@
+# Stdlib only (urllib.request) -- deliberately no requests/httpx dependency,
+# see attack_simulator/http_client.py.
