@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  CR-Sentinel Security Ops Dashboard (PRD-07) -- a read-only Lambda API in
+  front of CockroachDB (independent of the MCP channel PatrolAgentLambda
+  uses, per PRD-07's own read path) plus S3 + CloudFront static hosting
+  for the frontend in frontend/index.html.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 10
+    MemorySize: 128
+    Environment:
+      Variables:
+        CRDB_DASHBOARD_HOST: !Ref CrdbDashboardHost
+        CRDB_DASHBOARD_DATABASE: !Ref CrdbDashboardDatabase
+        CRDB_DASHBOARD_USER: !Ref CrdbDashboardUser
+        CRDB_DASHBOARD_PASSWORD: !Ref CrdbDashboardPassword
+
+Parameters:
+  CrdbDashboardHost:
+    Type: String
+  CrdbDashboardDatabase:
+    Type: String
+    Default: cr_sentinel
+  CrdbDashboardUser:
+    Type: String
+  CrdbDashboardPassword:
+    Type: String
+    NoEcho: true
+
+Resources:
+  LogsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: dashboard_api.app.logs_handler
+      Events:
+        Logs:
+          Type: Api
+          Properties:
+            Path: /logs
+            Method: get
+
+  BlacklistFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: dashboard_api.app.blacklist_handler
+      Events:
+        Blacklist:
+          Type: Api
+          Properties:
+            Path: /blacklist
+            Method: get
+
+  EpisodesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: dashboard_api.app.episodes_handler
+      Events:
+        Episodes:
+          Type: Api
+          Properties:
+            Path: /episodes
+            Method: get
+
+  # --- Static frontend hosting: S3 (private, no public access) fronted by
+  # CloudFront over Origin Access Control -- the modern replacement for the
+  # legacy Origin Access Identity, no bucket-policy wildcard needed. Deploy
+  # frontend/index.html with:
+  #   aws s3 cp frontend/index.html s3://<FrontendBucket>/index.html
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-frontend-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  FrontendOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Origins:
+          - Id: FrontendBucketOrigin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt FrontendOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: FrontendBucketOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          # AWS managed "CachingOptimized" policy.
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution.Id}"
+
+Outputs:
+  DashboardApiUrl:
+    Description: Base URL of the read-only dashboard API -- paste this into the frontend's "API base URL" field
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+  FrontendBucketName:
+    Description: S3 bucket to upload frontend/index.html into
+    Value: !Ref FrontendBucket
+  FrontendUrl:
+    Description: CloudFront URL for the dashboard frontend
+    Value: !Sub "https://${FrontendDistribution.DomainName}"

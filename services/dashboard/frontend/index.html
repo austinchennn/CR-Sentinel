@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>CR-Sentinel Security Ops Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #131a22;
+    --border: #223041;
+    --text: #d7e2ec;
+    --muted: #7f92a3;
+    --accent: #4fb3ff;
+    --normal: #3ecf8e;
+    --low: #e8b83f;
+    --high: #ef5b5b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .config { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  input, button {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  button {
+    cursor: pointer;
+    background: #1a2531;
+  }
+  button:hover { border-color: var(--accent); }
+  nav { display: flex; gap: 4px; padding: 12px 24px 0; border-bottom: 1px solid var(--border); }
+  nav button {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    padding: 10px 14px;
+    color: var(--muted);
+  }
+  nav button.active { color: var(--text); border-bottom-color: var(--accent); }
+  main { padding: 20px 24px; }
+  .view { display: none; }
+  .view.active { display: block; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+  .toolbar .status { color: var(--muted); font-size: 12px; margin-left: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+  th { color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--bg); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge.status-2 { background: rgba(62,207,142,.15); color: var(--normal); }
+  .badge.status-4 { background: rgba(232,184,63,.15); color: var(--low); }
+  .badge.status-5 { background: rgba(239,91,91,.15); color: var(--high); }
+  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .panel h2 { margin: 0 0 10px; font-size: 14px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .timeline { list-style: none; margin: 0; padding: 0; border-left: 2px solid var(--border); margin-left: 6px; }
+  .timeline li { position: relative; padding: 0 0 20px 20px; }
+  .timeline li::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 3px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--bg);
+  }
+  .timeline li.risk-normal::before { background: var(--normal); }
+  .timeline li.risk-low::before { background: var(--low); }
+  .timeline li.risk-high::before { background: var(--high); }
+  .timeline .meta { color: var(--muted); font-size: 12px; margin-bottom: 3px; }
+  .timeline .risk-tag { font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: .03em; }
+  .timeline li.risk-normal .risk-tag { color: var(--normal); }
+  .timeline li.risk-low .risk-tag { color: var(--low); }
+  .timeline li.risk-high .risk-tag { color: var(--high); }
+  .timeline .reasoning { margin-top: 4px; color: var(--text); }
+  .empty { color: var(--muted); font-size: 13px; padding: 20px 0; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>CR-Sentinel</h1>
+    <div class="sub">Security Ops Dashboard</div>
+  </div>
+  <div class="config">
+    <input id="api-base-url" type="text" placeholder="Dashboard API base URL, e.g. https://xxx.execute-api.region.amazonaws.com/Prod" size="52" />
+    <button id="save-config">Save</button>
+  </div>
+</header>
+
+<nav>
+  <button class="tab active" data-view="logs-view">Log Stream</button>
+  <button class="tab" data-view="blacklist-view">Blacklist &amp; Rate Limits</button>
+  <button class="tab" data-view="timeline-view">Agent Memory Timeline</button>
+</nav>
+
+<main>
+
+  <section id="logs-view" class="view active">
+    <div class="toolbar">
+      <input id="logs-ip" type="text" placeholder="filter by IP" size="16" />
+      <input id="logs-status" type="text" placeholder="filter by status code" size="16" />
+      <button id="logs-refresh">Refresh</button>
+      <label style="color: var(--muted); font-size: 12px;"><input id="logs-auto" type="checkbox" checked /> auto-refresh (5s)</label>
+      <span class="status" id="logs-status-line"></span>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Time</th><th>IP</th><th>Method</th><th>Path</th><th>Query</th><th>Status</th><th>User</th><th>ms</th></tr>
+      </thead>
+      <tbody id="logs-body"></tbody>
+    </table>
+    <div class="empty" id="logs-empty" style="display:none;">No requests yet. Run the attack simulator or hit the demo app.</div>
+  </section>
+
+  <section id="blacklist-view" class="view">
+    <div class="toolbar">
+      <button id="blacklist-refresh">Refresh</button>
+      <span class="status" id="blacklist-status-line"></span>
+    </div>
+    <div class="panels">
+      <div class="panel">
+        <h2>IP Blacklist (active)</h2>
+        <table>
+          <thead><tr><th>IP</th><th>Risk</th><th>Blocked Until</th><th>Reason</th></tr></thead>
+          <tbody id="blacklist-body"></tbody>
+        </table>
+        <div class="empty" id="blacklist-empty" style="display:none;">No active blacklist entries.</div>
+      </div>
+      <div class="panel">
+        <h2>Rate Limits (active)</h2>
+        <table>
+          <thead><tr><th>IP</th><th>Limit/min</th><th>Expires</th></tr></thead>
+          <tbody id="ratelimit-body"></tbody>
+        </table>
+        <div class="empty" id="ratelimit-empty" style="display:none;">No active rate limits.</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="timeline-view" class="view">
+    <div class="toolbar">
+      <input id="timeline-ip" type="text" placeholder="IP to inspect, e.g. 203.0.113.5" size="20" />
+      <button id="timeline-fetch">Load Timeline</button>
+      <span class="status" id="timeline-status-line"></span>
+    </div>
+    <ul class="timeline" id="timeline-list"></ul>
+    <div class="empty" id="timeline-empty">Enter an IP and load its agent_episodes history -- this is where the patrol agent's memory becomes visible: watch risk_level escalate across rounds as it recalls its own past verdicts on the same IP.</div>
+  </section>
+
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  const CONFIG_KEY = "cr-sentinel-dashboard-api-base-url";
+  const apiInput = document.getElementById("api-base-url");
+  apiInput.value = localStorage.getItem(CONFIG_KEY) || "";
+  document.getElementById("save-config").addEventListener("click", () => {
+    localStorage.setItem(CONFIG_KEY, apiInput.value.trim());
+    refreshActiveView();
+  });
+
+  function apiBaseUrl() {
+    return (localStorage.getItem(CONFIG_KEY) || "").replace(/\/$/, "");
+  }
+
+  async function apiGet(path) {
+    const base = apiBaseUrl();
+    if (!base) throw new Error("Set the Dashboard API base URL above and click Save first.");
+    const resp = await fetch(base + path);
+    if (!resp.ok) throw new Error("API returned " + resp.status);
+    return resp.json();
+  }
+
+  function statusBadgeClass(code) {
+    return "badge status-" + String(code)[0];
+  }
+
+  function escapeHtml(value) {
+    const div = document.createElement("div");
+    div.textContent = value == null ? "" : String(value);
+    return div.innerHTML;
+  }
+
+  // ---- Tabs ----
+  document.querySelectorAll("nav .tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("nav .tab").forEach((b) => b.classList.remove("active"));
+      document.querySelectorAll("main .view").forEach((v) => v.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById(btn.dataset.view).classList.add("active");
+      refreshActiveView();
+    });
+  });
+
+  function refreshActiveView() {
+    if (document.getElementById("logs-view").classList.contains("active")) loadLogs();
+    if (document.getElementById("blacklist-view").classList.contains("active")) loadBlacklist();
+  }
+
+  // ---- Log stream ----
+  async function loadLogs() {
+    const statusLine = document.getElementById("logs-status-line");
+    try {
+      const ip = document.getElementById("logs-ip").value.trim();
+      const statusCode = document.getElementById("logs-status").value.trim();
+      let path = "/logs?limit=100";
+      if (ip) path += "&ip=" + encodeURIComponent(ip);
+      if (statusCode) path += "&status_code=" + encodeURIComponent(statusCode);
+
+      const data = await apiGet(path);
+      const body = document.getElementById("logs-body");
+      body.innerHTML = "";
+      (data.logs || []).forEach((row) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + escapeHtml(row.ts) + "</td>" +
+          "<td>" + escapeHtml(row.src_ip) + "</td>" +
+          "<td>" + escapeHtml(row.method) + "</td>" +
+          "<td>" + escapeHtml(row.path) + "</td>" +
+          "<td>" + escapeHtml(row.query_params) + "</td>" +
+          "<td><span class=\"" + statusBadgeClass(row.status_code) + "\">" + escapeHtml(row.status_code) + "</span></td>" +
+          "<td>" + escapeHtml(row.user_id) + "</td>" +
+          "<td>" + escapeHtml(row.response_time_ms) + "</td>";
+        body.appendChild(tr);
+      });
+      document.getElementById("logs-empty").style.display = (data.logs || []).length ? "none" : "block";
+      statusLine.textContent = "updated " + new Date().toLocaleTimeString();
+    } catch (err) {
+      statusLine.textContent = err.message;
+    }
+  }
+  document.getElementById("logs-refresh").addEventListener("click", loadLogs);
+  setInterval(() => {
+    if (document.getElementById("logs-auto").checked && document.getElementById("logs-view").classList.contains("active")) {
+      loadLogs();
+    }
+  }, 5000);
+
+  // ---- Blacklist & rate limits ----
+  async function loadBlacklist() {
+    const statusLine = document.getElementById("blacklist-status-line");
+    try {
+      const data = await apiGet("/blacklist");
+
+      const blBody = document.getElementById("blacklist-body");
+      blBody.innerHTML = "";
+      (data.blacklist || []).forEach((row) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + escapeHtml(row.ip) + "</td>" +
+          "<td>" + escapeHtml(row.risk_level) + "</td>" +
+          "<td>" + escapeHtml(row.block_until || "permanent") + "</td>" +
+          "<td>" + escapeHtml(row.attack_reason) + "</td>";
+        blBody.appendChild(tr);
+      });
+      document.getElementById("blacklist-empty").style.display = (data.blacklist || []).length ? "none" : "block";
+
+      const rlBody = document.getElementById("ratelimit-body");
+      rlBody.innerHTML = "";
+      (data.rate_limits || []).forEach((row) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + escapeHtml(row.ip) + "</td>" +
+          "<td>" + escapeHtml(row.limit_per_min) + "</td>" +
+          "<td>" + escapeHtml(row.expires_at) + "</td>";
+        rlBody.appendChild(tr);
+      });
+      document.getElementById("ratelimit-empty").style.display = (data.rate_limits || []).length ? "none" : "block";
+
+      statusLine.textContent = "updated " + new Date().toLocaleTimeString();
+    } catch (err) {
+      statusLine.textContent = err.message;
+    }
+  }
+  document.getElementById("blacklist-refresh").addEventListener("click", loadBlacklist);
+
+  // ---- Agent memory timeline ----
+  async function loadTimeline() {
+    const statusLine = document.getElementById("timeline-status-line");
+    const ip = document.getElementById("timeline-ip").value.trim();
+    if (!ip) {
+      statusLine.textContent = "Enter an IP first.";
+      return;
+    }
+    try {
+      const data = await apiGet("/episodes?ip=" + encodeURIComponent(ip));
+      const list = document.getElementById("timeline-list");
+      list.innerHTML = "";
+      const episodes = data.episodes || [];
+      episodes.forEach((ep) => {
+        const li = document.createElement("li");
+        li.className = "risk-" + (ep.risk_level || "normal");
+        li.innerHTML =
+          "<div class=\"meta\">" + escapeHtml(ep.ts) + " &middot; <span class=\"risk-tag\">" + escapeHtml(ep.risk_level) +
+          "</span> &middot; " + escapeHtml(ep.attack_type) + " &middot; action=" + escapeHtml(ep.action_taken) + "</div>" +
+          "<div class=\"reasoning\">" + escapeHtml(ep.reasoning_summary) + "</div>";
+        list.appendChild(li);
+      });
+      document.getElementById("timeline-empty").style.display = episodes.length ? "none" : "block";
+      if (!episodes.length) {
+        document.getElementById("timeline-empty").textContent = "No agent_episodes recorded yet for " + ip + ".";
+      }
+      statusLine.textContent = episodes.length + " episode(s) loaded";
+    } catch (err) {
+      statusLine.textContent = err.message;
+    }
+  }
+  document.getElementById("timeline-fetch").addEventListener("click", loadTimeline);
+  document.getElementById("timeline-ip").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") loadTimeline();
+  });
+
+  // Initial load.
+  loadLogs();
+})();
+</script>
+
+</body>
+</html>
