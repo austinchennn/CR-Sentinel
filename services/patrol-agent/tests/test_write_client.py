@@ -43,29 +43,33 @@ def test_write_episode_inserts_with_embedding(fake_conn):
         reasoning_summary="repeated sleep() timing probes",
         action_taken="blacklist",
         embedding=embedding,
+        idempotency_key="key-1",
     )
 
     statement, params = fake_conn.executed[0]
     assert "INSERT INTO agent_episodes" in statement
-    assert params[1:] == ("203.0.113.5", "high", "sqli", "repeated sleep() timing probes", "blacklist", embedding)
+    assert "ON CONFLICT (idempotency_key) DO NOTHING" in statement
+    assert params[1:] == ("203.0.113.5", "high", "sqli", "repeated sleep() timing probes", "blacklist", embedding, "key-1")
 
 
 def test_write_task_defaults_to_pending(fake_conn):
     client = CrdbWriteClient(fake_conn)
-    client.write_task("harden_endpoint", {"path": "/admin"})
+    client.write_task("harden_endpoint", {"path": "/admin"}, idempotency_key="key-2")
 
     statement, params = fake_conn.executed[0]
     assert "task_queue" in statement
-    assert params[1:] == ("harden_endpoint", {"path": "/admin"})
+    assert "ON CONFLICT (idempotency_key) DO NOTHING" in statement
+    assert params[1:] == ("harden_endpoint", {"path": "/admin"}, "key-2")
 
 
 def test_write_alert_inserts_and_returns_id(fake_conn):
     client = CrdbWriteClient(fake_conn)
-    alert_id = client.write_alert("high", "IP 203.0.113.5 blacklisted for sqli")
+    alert_id = client.write_alert("high", "IP 203.0.113.5 blacklisted for sqli", idempotency_key="key-3")
 
     statement, params = fake_conn.executed[0]
     assert "INSERT INTO alert_log" in statement
-    assert params == (alert_id, "high", "IP 203.0.113.5 blacklisted for sqli")
+    assert "ON CONFLICT (idempotency_key) DO NOTHING" in statement
+    assert params == (alert_id, "high", "IP 203.0.113.5 blacklisted for sqli", "key-3")
 
 
 def test_mark_alert_sent_updates_by_id(fake_conn):
@@ -83,7 +87,7 @@ def test_write_failure_rolls_back_and_raises_crdb_write_error(fake_conn):
     client = CrdbWriteClient(fake_conn)
 
     with pytest.raises(CrdbWriteError):
-        client.write_alert("high", "boom")
+        client.write_alert("high", "boom", idempotency_key="key-4")
 
     assert fake_conn.rolled_back == 1
     assert fake_conn.committed == 0

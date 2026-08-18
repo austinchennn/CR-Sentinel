@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from patrol_agent.bedrock_judge import Verdict
 from patrol_agent.errors import BedrockJudgeError, CrdbWriteError, McpUnavailableError
 from patrol_agent.memory_gateway import PatrolMemoryGateway
-from patrol_agent.patrol_loop import run_patrol_round
+from patrol_agent.patrol_loop import _compute_round_idempotency_key, run_patrol_round
 
 
 class FakeReadClient:
@@ -67,16 +67,16 @@ class FakeWriteClient:
     def lock_account(self, user_id, reason):
         self._record("lock_account", dict(user_id=user_id, reason=reason))
 
-    def write_episode(self, *, ip, risk_level, attack_type, reasoning_summary, action_taken, embedding):
-        self._record("write_episode", dict(ip=ip, risk_level=risk_level, attack_type=attack_type, reasoning_summary=reasoning_summary, action_taken=action_taken, embedding=embedding))
+    def write_episode(self, *, ip, risk_level, attack_type, reasoning_summary, action_taken, embedding, idempotency_key):
+        self._record("write_episode", dict(ip=ip, risk_level=risk_level, attack_type=attack_type, reasoning_summary=reasoning_summary, action_taken=action_taken, embedding=embedding, idempotency_key=idempotency_key))
 
-    def write_task(self, task_type, payload):
-        self._record("write_task", dict(task_type=task_type, payload=payload))
+    def write_task(self, task_type, payload, idempotency_key):
+        self._record("write_task", dict(task_type=task_type, payload=payload, idempotency_key=idempotency_key))
 
-    def write_alert(self, severity, message):
+    def write_alert(self, severity, message, idempotency_key):
         self._next_alert_id += 1
         alert_id = f"alert-{self._next_alert_id}"
-        self._record("write_alert", dict(severity=severity, message=message, alert_id=alert_id))
+        self._record("write_alert", dict(severity=severity, message=message, alert_id=alert_id, idempotency_key=idempotency_key))
         return alert_id
 
     def mark_alert_sent(self, alert_id):
@@ -423,6 +423,53 @@ def test_disposal_write_failure_does_not_block_episode_write():
     _run(logs, write_client, judge)
 
     assert write_client.calls_named("write_episode")
+
+
+def test_idempotency_key_is_stable_for_the_same_ip_and_log_ids():
+    rows = [{"id": "log-1"}, {"id": "log-2"}]
+
+    key_a = _compute_round_idempotency_key("1.1.1.1", rows)
+    key_b = _compute_round_idempotency_key("1.1.1.1", list(reversed(rows)))
+
+    assert key_a == key_b
+
+
+def test_idempotency_key_differs_for_different_log_ids():
+    key_a = _compute_round_idempotency_key("1.1.1.1", [{"id": "log-1"}])
+    key_b = _compute_round_idempotency_key("1.1.1.1", [{"id": "log-2"}])
+
+    assert key_a != key_b
+
+
+def test_idempotency_key_differs_for_different_ips_with_same_logs():
+    rows = [{"id": "log-1"}]
+
+    key_a = _compute_round_idempotency_key("1.1.1.1", rows)
+    key_b = _compute_round_idempotency_key("2.2.2.2", rows)
+
+    assert key_a != key_b
+
+
+def test_high_verdict_dispatch_passes_matching_idempotency_key_to_all_three_writes():
+    logs = [
+        {"src_ip": "1.1.1.1", "id": "log-1", "status_code": 403, "path": "/admin", "query_params": "", "body_snippet": "", "method": "GET"},
+        {"src_ip": "1.1.1.1", "id": "log-2", "status_code": 403, "path": "/admin", "query_params": "", "body_snippet": "", "method": "GET"},
+    ]
+    judge = FakeJudge(verdicts_by_ip={
+        "1.1.1.1": Verdict(
+            ip="1.1.1.1", risk_level="high", attack_type="sqli", reasoning="union select attack",
+            action={"type": "blacklist_temporary", "block_hours": 12},
+        ),
+    })
+    write_client = FakeWriteClient()
+
+    _run(logs, write_client, judge)
+
+    expected_key = _compute_round_idempotency_key("1.1.1.1", logs)
+    alert_key = write_client.calls_named("write_alert")[0]["idempotency_key"]
+    episode_key = write_client.calls_named("write_episode")[0]["idempotency_key"]
+    assert alert_key == expected_key
+    assert episode_key == expected_key
 
 
 def test_write_failure_is_swallowed_not_raised():
