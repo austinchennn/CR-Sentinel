@@ -1,6 +1,6 @@
 # PRD-09：可观测性 & 生产就绪加固
 
-> **状态：🟡 部分完成** —— 各服务的重试/降级处理已经在 PRD-03/04 里实现（MCP 失败降级、per-IP 隔离、写入失败回滚，见 `patrol_agent/memory_gateway.py`/`patrol_loop.py`/`write_client.py`），但 IAM 最小权限收紧、CloudWatch 指标看板、ccloud 审计日志展示等基础设施层面的加固工作尚未开始。
+> **状态：🟡 基本完成** —— 重试/降级处理见 PRD-03/04（`patrol_agent/memory_gateway.py`/`patrol_loop.py`/`write_client.py`）；IAM 最小权限收紧、CloudWatch 指标/告警/看板、凭证管理确认、幂等性复查见 `docs/06-production-readiness.md`。剩两项未做：（1）`agent_episodes`/`task_queue`/`alert_log` 在 Lambda 重试场景下的幂等性——已定位问题、记录了不能简单修的原因和建议方案，见 `docs/06-production-readiness.md` §4"已知限制"；（2）可选项 ccloud CLI 审计日志展示，需要真实集群访问，未做。
 
 ## 目标
 
