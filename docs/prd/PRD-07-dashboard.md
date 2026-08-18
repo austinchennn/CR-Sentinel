@@ -1,6 +1,6 @@
 # PRD-07：Security Ops Dashboard
 
-> **状态：⬜ 未开始**。
+> **状态：✅ 已完成** —— `services/dashboard`（只读 Lambda API 三个 endpoint + 单文件静态前端 + S3/CloudFront IaC）。验收标准里"真实数据加载/几秒内看到新记录"这部分需要真实部署环境才能验证，见 README「Manual verification」章节。
 
 ## 目标
 
