@@ -15,6 +15,7 @@ from .embeddings import embed_text
 from .interfaces import AlertPublisher, WriteClient
 from .mcp_read_client import McpReadOnlyClient
 from .memory_gateway import PatrolMemoryGateway
+from .metrics import CloudWatchMetrics
 from .patrol_loop import run_patrol_round
 from .write_client import CrdbWriteClient
 
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 _write_client: WriteClient = None
 _alert_publisher: AlertPublisher = None
+_metrics = None
 
 
 def _get_write_client() -> WriteClient:
@@ -37,6 +39,13 @@ def _get_alert_publisher() -> AlertPublisher:
     if _alert_publisher is None:
         _alert_publisher = SnsAlertPublisher.connect(SnsConfig.from_env())
     return _alert_publisher
+
+
+def _get_metrics() -> CloudWatchMetrics:
+    global _metrics
+    if _metrics is None:
+        _metrics = CloudWatchMetrics.connect()
+    return _metrics
 
 
 def patrol_handler(event, context):
@@ -62,6 +71,16 @@ def patrol_handler(event, context):
         "patrol_round_complete degraded=%s logs_read=%d suspicious_ip_count=%d verdict_count=%d",
         summary.degraded, summary.logs_read, summary.suspicious_ip_count, len(summary.verdicts),
     )
+
+    try:
+        _get_metrics().publish_round_summary(summary)
+    except Exception as exc:
+        # A CloudWatch hiccup must never mask the round's actual result --
+        # disposal/alert writes already happened by this point (PRD-09
+        # functional requirement 3's metrics are observability, not part
+        # of the safety-critical path).
+        logger.warning("patrol_metrics_publish_failed", exc_info=exc)
+
     return {
         "degraded": summary.degraded,
         "logs_read": summary.logs_read,
