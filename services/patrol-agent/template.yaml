@@ -80,17 +80,33 @@ Resources:
       CodeUri: .
       Handler: patrol_agent.app.patrol_handler
       Policies:
+        # Scoped to the two foundation models this function actually
+        # calls (BedrockJudge's Converse call, embeddings.embed_text's
+        # InvokeModel call) rather than Resource: "*" -- PRD-09 functional
+        # requirement 1's "逐条检查...去掉一切非必要权限".
         - Statement:
             - Effect: Allow
               Action:
-                - bedrock:InvokeModel
                 - bedrock:Converse
-              Resource: "*"
+              Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}"
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0"
         - Statement:
             - Effect: Allow
               Action:
                 - sns:Publish
               Resource: !Ref AlertTopic
+        - Statement:
+            # cloudwatch:PutMetricData has no resource-level permissions in
+            # AWS's IAM model (see AWS's own service authorization
+            # reference) -- Resource: "*" here is the tightest this action
+            # can be scoped, not an oversight.
+            - Effect: Allow
+              Action:
+                - cloudwatch:PutMetricData
+              Resource: "*"
       Events:
         PatrolSchedule:
           Type: ScheduleV2
@@ -99,6 +115,95 @@ Resources:
             FlexibleTimeWindow:
               Mode: "OFF"
 
+  # PRD-09 functional requirement 3: "关键错误（MCP 连接失败、Bedrock 调用失败）
+  # 配置 CloudWatch Alarm". FunctionErrorAlarm catches any unhandled
+  # exception in the whole invocation (Bedrock/CRDB/boto3 errors that
+  # escape patrol_loop.py's own per-IP/per-channel try/except all still
+  # surface as a Lambda error); RoundDegradedAlarm catches the specific
+  # "MCP channel unreachable" case metrics.py's RoundDegraded metric
+  # tracks, which a plain Lambda-error alarm wouldn't catch since
+  # PatrolMemoryGateway degrades gracefully instead of raising.
+  FunctionErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-function-errors"
+      AlarmDescription: PatrolAgentLambda raised an unhandled exception during a patrol round.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref PatrolAgentFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  RoundDegradedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-round-degraded"
+      AlarmDescription: The MCP read channel was unreachable for 3 consecutive patrol rounds (see memory_gateway.py's degrade-on-failure behavior).
+      Namespace: CRSentinel/PatrolAgent
+      MetricName: RoundDegraded
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  PatrolAgentDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AWS::StackName}-patrol-agent"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric", "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Lambda invocations / errors",
+                "metrics": [
+                  ["AWS/Lambda", "Invocations", "FunctionName", "${PatrolAgentFunction}", {"stat": "Sum"}],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${PatrolAgentFunction}", {"stat": "Sum"}]
+                ],
+                "period": 300, "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Lambda duration",
+                "metrics": [["AWS/Lambda", "Duration", "FunctionName", "${PatrolAgentFunction}", {"stat": "Average"}]],
+                "period": 300, "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "Patrol round verdicts (PRD-09 custom metrics)",
+                "metrics": [
+                  ["CRSentinel/PatrolAgent", "LogsRead", {"stat": "Sum"}],
+                  ["CRSentinel/PatrolAgent", "SuspiciousIpCount", {"stat": "Sum"}],
+                  ["CRSentinel/PatrolAgent", "HighRiskVerdicts", {"stat": "Sum"}],
+                  ["CRSentinel/PatrolAgent", "LowRiskVerdicts", {"stat": "Sum"}]
+                ],
+                "period": 300, "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "Degraded rounds (MCP unreachable)",
+                "metrics": [["CRSentinel/PatrolAgent", "RoundDegraded", {"stat": "Sum"}]],
+                "period": 300, "region": "${AWS::Region}"
+              }
+            }
+          ]
+        }
+
 Outputs:
   PatrolAgentFunctionArn:
     Description: ARN of PatrolAgentLambda, for CloudWatch Alarms (PRD-09) and manual invokes
@@ -106,3 +211,6 @@ Outputs:
   AlertTopicArn:
     Description: ARN of the PRD-06 SNS alert topic, for adding further subscriptions (e.g. a second on-call mailbox)
     Value: !Ref AlertTopic
+  PatrolAgentDashboardUrl:
+    Description: CloudWatch console URL for the PRD-09 patrol-agent dashboard
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${PatrolAgentDashboard}"
