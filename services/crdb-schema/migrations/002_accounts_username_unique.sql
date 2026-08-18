@@ -1,0 +1,14 @@
+-- Adds a uniqueness guarantee on accounts.username (docs/03-open-issues.md
+-- #2): db.py's get_account_by_username assumes username is unique and
+-- only reads the first matching row back, but 001_core_tables.sql never
+-- enforced that at the schema level. Only seed_accounts.py writes to
+-- accounts today, and it has no duplicate usernames, so this is safe to
+-- apply against the existing seeded data -- but nothing stopped a future
+-- write path (e.g. a real registration flow) from creating a same-name
+-- collision that would make login resolve to a random account of that
+-- name.
+--
+-- Idempotent and additive, same convention as 001_core_tables.sql (PRD-01
+-- functional requirement 5) -- safe to re-run, and applied after 001 by
+-- scripts/run_migrations.sh's lexical *.sql ordering.
+CREATE UNIQUE INDEX IF NOT EXISTS accounts_username_key ON accounts (username);
