@@ -23,6 +23,7 @@ def _patch_write_client_connect(monkeypatch, fake_client):
     calls = []
     monkeypatch.setattr(app_mod, "_write_client", None)
     monkeypatch.setattr(app_mod, "_alert_publisher", None)
+    monkeypatch.setattr(app_mod, "_metrics", None)
     monkeypatch.setattr(
         app_mod.CrdbWriteClient, "connect", classmethod(lambda cls, config=None: calls.append(config) or fake_client)
     )

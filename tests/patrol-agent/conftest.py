@@ -105,6 +105,7 @@ def fake_boto3(monkeypatch):
         def __init__(self):
             self.converse_calls = []
             self.invoke_model_calls = []
+            self.put_metric_data_calls = []
             self.converse_response = None
             self.embedding = [0.0] * 1024
 
@@ -121,6 +122,14 @@ def fake_boto3(monkeypatch):
                     return body
 
             return {"body": _Body()}
+
+        def put_metric_data(self, **kwargs):
+            # boto3.client(...) resolves to this same fake regardless of
+            # service name (see `client()` below) -- CloudWatchMetrics
+            # calls put_metric_data on whatever client patrol_agent.app
+            # wires up, so this fake needs the method even though it's
+            # modeling "bedrock-runtime" everywhere else.
+            self.put_metric_data_calls.append(kwargs)
 
     fake_client = _FakeBedrockClient()
     fake_module = types.ModuleType("boto3")
