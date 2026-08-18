@@ -1,6 +1,9 @@
 # PRD-10：提交打包
 
-> **状态：⬜ 未开始**。
+> **状态：🟡 基本完成** —— 英文 README（含架构图）、LICENSE（MIT）、Devpost 表单文案
+> （`docs/07-devpost-submission.md`）均已完成。剩两项做不了：**演示视频**（需要真实录屏/上传
+> YouTube，超出代码/文档能力范围）、**functional demo app 的可访问 URL**（需要真实部署）。
+> 详见 `docs/07-devpost-submission.md` 顶部的提交清单核对。
 
 ## 目标
 
