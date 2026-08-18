@@ -377,6 +377,54 @@ def test_alert_publish_failure_does_not_block_episode_write():
     assert write_client.calls_named("write_episode")
 
 
+def test_high_verdict_episode_embedding_failure_does_not_block_disposal_or_alert():
+    logs = [_suspicious_row("1.1.1.1")]
+    judge = FakeJudge(verdicts_by_ip={
+        "1.1.1.1": Verdict(
+            ip="1.1.1.1", risk_level="high", attack_type="sqli", reasoning="union select attack",
+            action={"type": "blacklist_temporary", "block_hours": 12},
+        ),
+    })
+    write_client = FakeWriteClient()
+    alert_publisher = FakeAlertPublisher()
+    read_client = FakeReadClient(logs)
+    gateway = PatrolMemoryGateway(read_client)
+
+    calls = []
+
+    def embed_fn(text):
+        calls.append(text)
+        if len(calls) == 1:
+            return [0.1, 0.2, 0.3]
+        raise RuntimeError("embedding backend down")
+
+    summary = run_patrol_round(
+        memory_gateway=gateway, read_client=read_client, write_client=write_client, judge=judge,
+        embed_fn=embed_fn, alert_publisher=alert_publisher,
+    )
+
+    assert len(summary.verdicts) == 1
+    assert write_client.calls_named("write_blacklist")
+    assert write_client.calls_named("write_alert")
+    assert alert_publisher.published
+    assert write_client.calls_named("write_episode") == []
+
+
+def test_disposal_write_failure_does_not_block_episode_write():
+    logs = [_suspicious_row("1.1.1.1")]
+    judge = FakeJudge(verdicts_by_ip={
+        "1.1.1.1": Verdict(
+            ip="1.1.1.1", risk_level="high", attack_type="sqli", reasoning="x",
+            action={"type": "blacklist_temporary"},
+        ),
+    })
+    write_client = FakeWriteClient(fail_on={"write_blacklist"})
+
+    _run(logs, write_client, judge)
+
+    assert write_client.calls_named("write_episode")
+
+
 def test_write_failure_is_swallowed_not_raised():
     logs = [_suspicious_row("1.1.1.1")]
     judge = FakeJudge(verdicts_by_ip={

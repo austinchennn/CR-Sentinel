@@ -8,12 +8,18 @@ semantic recall of that IP's suspicious text, and that IP's own
 `agent_episodes` history. Re-running `read_recent_logs` per IP would just
 repeat the same window query N times for no benefit.
 
-Every per-IP step (embedding, MCP reads, Bedrock) is wrapped so one IP's
-failure is logged and skipped rather than aborting the rest of the round --
-see PRD-09's "MCP/Bedrock/CRDB 写入任一环节失败时...宁可整轮跳过该项，不要写入
-不完整的处置记录", applied here at IP granularity so an EventBridge cycle
-with 30 suspicious IPs doesn't lose all 30 verdicts because IP #1's Bedrock
-call timed out.
+Every per-IP signal-gathering step (embedding, MCP reads, Bedrock) is
+wrapped so one IP's failure is logged and skipped rather than aborting the
+rest of the round -- see PRD-09's "MCP/Bedrock/CRDB 写入任一环节失败时...宁可
+整轮跳过该项，不要写入不完整的处置记录", applied here at IP granularity so an
+EventBridge cycle with 30 suspicious IPs doesn't lose all 30 verdicts
+because IP #1's Bedrock call timed out.
+
+Once a verdict exists, `_dispatch_verdict` deliberately does NOT apply that
+same all-or-nothing rule across disposal/alert vs. episode-memory writes --
+see its docstring: those are two independent failure domains, because a
+confirmed `high` verdict's actual block/alert must not be cancelled by an
+unrelated embedding hiccup.
 """
 import json
 import logging
@@ -118,24 +124,40 @@ def _judge_one_ip(*, ip, ip_logs, read_client: ReadClient, judge: Judge, embed_f
 
 
 def _dispatch_verdict(verdict: Verdict, *, write_client: WriteClient, embed_fn: EmbedFn, alert_publisher: Optional[AlertPublisher] = None):
+    """Disposal/alert and episode-memory writes are deliberately independent
+    failure domains. A confirmed `high` verdict's blacklist/rate-limit/
+    lock-account/alert must go out even if the *unrelated* Titan embedding
+    call for `agent_episodes` fails (rate limit, transient network blip) --
+    letting an embedding hiccup silently cancel an already-decided block is
+    a real security gap for a product whose job is automated defense. Only
+    the `agent_episodes` memory row is allowed to be skipped on embedding
+    failure; see docs/03-open-issues.md #1 for the incident this fixes."""
     if verdict.risk_level == "normal":
         return
 
+    action = verdict.action or {}
+    action_type = action.get("type", "none")
+
+    if verdict.risk_level == "high":
+        try:
+            _execute_disposal_action(verdict, action, action_type, write_client=write_client)
+            subject, body = alerting.format_alert_message(verdict, action_type)
+            alert_id = write_client.write_alert(severity="high", message=body)
+            _publish_alert(alert_publisher, write_client, alert_id=alert_id, ip=verdict.ip, subject=subject, body=body)
+        except CrdbWriteError as exc:
+            logger.warning("patrol_write_failed ip=%s risk_level=%s", verdict.ip, verdict.risk_level, exc_info=exc)
+
+    _write_episode(verdict, action_type, write_client=write_client, embed_fn=embed_fn)
+
+
+def _write_episode(verdict: Verdict, action_type, *, write_client: WriteClient, embed_fn: EmbedFn):
     try:
         episode_embedding = embed_fn(verdict.reasoning or verdict.attack_type or verdict.ip)
     except Exception as exc:
         logger.warning("patrol_episode_embedding_failed ip=%s", verdict.ip, exc_info=exc)
         return
 
-    action = verdict.action or {}
-    action_type = action.get("type", "none")
-
     try:
-        if verdict.risk_level == "high":
-            _execute_disposal_action(verdict, action, action_type, write_client=write_client)
-            subject, body = alerting.format_alert_message(verdict, action_type)
-            alert_id = write_client.write_alert(severity="high", message=body)
-            _publish_alert(alert_publisher, write_client, alert_id=alert_id, ip=verdict.ip, subject=subject, body=body)
         write_client.write_episode(
             ip=verdict.ip,
             risk_level=verdict.risk_level,
